@@ -1,5 +1,6 @@
-import pytest
 import math
+
+import pytest
 
 from tokenguard import FakeClock, TokenBucket
 
@@ -42,9 +43,9 @@ def test_never_exceeds_capacity(clock):
 def test_fractional_refill(clock):
     b = make(clock, capacity=5, rate=0.5)
     b.allow(5)
-    clock.advance(1)                 # 0.5 tokens
+    clock.advance(1)  # 0.5 tokens
     assert not b.allow().allowed
-    clock.advance(1)                 # 1.0 tokens
+    clock.advance(1)  # 1.0 tokens
     assert b.allow().allowed
 
 
@@ -55,7 +56,7 @@ def test_cost_above_capacity_always_rejected(clock):
 def test_zero_cost_allowed_and_free(clock):
     b = make(clock)
     assert b.allow(0).allowed is True
-    assert b.allow(10).allowed is True       # nothing was spent
+    assert b.allow(10).allowed is True  # nothing was spent
 
 
 def test_negative_cost_raises(clock):
@@ -80,11 +81,11 @@ def test_invalid_constructor_args(cap, rate):
 def test_retry_after_is_accurate(clock):
     b = make(clock, capacity=10, rate=2)
     b.allow(10)
-    d = b.allow(4)                       # need 4 tokens at 2/sec → 2 seconds
+    d = b.allow(4)  # need 4 tokens at 2/sec → 2 seconds
     assert not d.allowed
     assert d.retry_after == pytest.approx(2.0)
     clock.advance(d.retry_after)
-    assert b.allow(4).allowed            # waiting that long really works
+    assert b.allow(4).allowed  # waiting that long really works
 
 
 def test_retry_after_zero_when_allowed(clock):
