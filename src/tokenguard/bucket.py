@@ -1,30 +1,72 @@
-from tokenguard.clock import SystemClock
+"""In-memory token bucket rate limiter."""
+
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass
+
+from tokenguard.clock import Clock, SystemClock
+
+
+@dataclass(frozen=True)
+class Decision:
+    """Result of a rate-limit check."""
+
+    allowed: bool
+    remaining: float
+    retry_after: float  # seconds until enough tokens exist (inf if never)
+
 
 class TokenBucket:
-    def __init__(self, capacity, refill_rate, clock=None):
+    """Holds up to `capacity` tokens, refilling at `refill_rate` tokens/second.
+
+    Each request spends `cost` tokens; if there aren't enough it is rejected.
+    """
+
+    def __init__(
+        self,
+        capacity: float,
+        refill_rate: float,
+        clock: Clock | None = None,
+    ) -> None:
         if capacity <= 0:
             raise ValueError("capacity must be > 0")
         if refill_rate <= 0:
             raise ValueError("refill_rate must be > 0")
-        self.capacity = capacity
-        self.refill_rate = refill_rate
-        self._clock = clock or SystemClock()
-        self.tokens = capacity
-        self.last_refill = self._clock.now()
+        self.capacity = float(capacity)
+        self.refill_rate = float(refill_rate)
+        self._clock: Clock = clock or SystemClock()
+        self._tokens = self.capacity
+        self._last_refill = self._clock.now()
 
-    def allow(self, cost=1):
-    # Decision: negative cost is a caller bug, not a refund.
-        if cost < 0:
-         raise ValueError("cost must be >= 0")
+    def _refill(self) -> None:
         now = self._clock.now()
-    # Decision: if the clock goes backwards, add nothing (never negative).
-        elapsed = max(0.0, now - self.last_refill)
-        self.tokens = min(self.capacity, self.tokens + elapsed * self.refill_rate)
-        self.last_refill = now
+        # Decision: clock going backwards adds nothing (never negative).
+        elapsed = max(0.0, now - self._last_refill)
+        self._tokens = min(self.capacity, self._tokens + elapsed * self.refill_rate)
+        self._last_refill = now
 
-    # Decision: cost > capacity naturally fails (tokens can never reach it).
-    # Decision: cost == 0 is always allowed and spends nothing.
-        if self.tokens >= cost:
-         self.tokens -= cost
-         return True
-        return False
+    def _retry_after(self, cost: float) -> float:
+        # Decision: a cost above capacity can never succeed.
+        if cost > self.capacity:
+            return math.inf
+        return max(0.0, (cost - self._tokens) / self.refill_rate)
+
+    def allow(self, cost: float = 1) -> Decision:
+        """Try to spend `cost` tokens and return a Decision."""
+        if cost < 0:  # Decision: negative cost is a caller bug, not a refund.
+            raise ValueError("cost must be >= 0")
+        self._refill()
+        if cost <= self._tokens:  # cost == 0 is allowed and spends nothing
+            self._tokens -= cost
+            return Decision(True, self._tokens, 0.0)
+        return Decision(False, self._tokens, self._retry_after(cost))
+
+    def peek(self, cost: float = 1) -> Decision:
+        """Report what allow(cost) would say, without spending anything."""
+        if cost < 0:
+            raise ValueError("cost must be >= 0")
+        self._refill()
+        if cost <= self._tokens:
+            return Decision(True, self._tokens, 0.0)
+        return Decision(False, self._tokens, self._retry_after(cost))

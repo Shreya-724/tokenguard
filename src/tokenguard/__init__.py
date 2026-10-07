@@ -1,4 +1,4 @@
-from tokenguard.bucket import TokenBucket
-from tokenguard.clock import FakeClock, SystemClock
+from tokenguard.bucket import Decision, TokenBucket
+from tokenguard.clock import Clock, FakeClock, SystemClock
 
-__all__ = ["TokenBucket", "FakeClock", "SystemClock"]
+__all__ = ["TokenBucket", "Decision", "Clock", "SystemClock", "FakeClock"]
