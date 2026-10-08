@@ -17,6 +17,19 @@ class Decision:
     retry_after: float  # seconds until enough tokens exist (inf if never)
 
 
+def validate_params(capacity: float, refill_rate: float) -> None:
+    if capacity <= 0:
+        raise ValueError("capacity must be > 0")
+    if refill_rate <= 0:
+        raise ValueError("refill_rate must be > 0")
+
+
+def validate_cost(cost: float) -> None:
+    # Decision: negative cost is a caller bug, not a refund.
+    if cost < 0:
+        raise ValueError("cost must be >= 0")
+
+
 class TokenBucket:
     """Holds up to `capacity` tokens, refilling at `refill_rate` tokens/second.
 
@@ -29,10 +42,7 @@ class TokenBucket:
         refill_rate: float,
         clock: Clock | None = None,
     ) -> None:
-        if capacity <= 0:
-            raise ValueError("capacity must be > 0")
-        if refill_rate <= 0:
-            raise ValueError("refill_rate must be > 0")
+        validate_params(capacity, refill_rate)
         self.capacity = float(capacity)
         self.refill_rate = float(refill_rate)
         self._clock: Clock = clock or SystemClock()
@@ -54,8 +64,7 @@ class TokenBucket:
 
     def allow(self, cost: float = 1) -> Decision:
         """Try to spend `cost` tokens and return a Decision."""
-        if cost < 0:  # Decision: negative cost is a caller bug, not a refund.
-            raise ValueError("cost must be >= 0")
+        validate_cost(cost)
         self._refill()
         if cost <= self._tokens:  # cost == 0 is allowed and spends nothing
             self._tokens -= cost
@@ -64,8 +73,7 @@ class TokenBucket:
 
     def peek(self, cost: float = 1) -> Decision:
         """Report what allow(cost) would say, without spending anything."""
-        if cost < 0:
-            raise ValueError("cost must be >= 0")
+        validate_cost(cost)
         self._refill()
         if cost <= self._tokens:
             return Decision(True, self._tokens, 0.0)

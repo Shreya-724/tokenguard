@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "A token-aware, Redis-backed rate limiter for Django (work in progress)"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = ["redis>=5.0"]
 
 [project.optional-dependencies]
 dev = ["pytest", "pytest-cov", "ruff"]

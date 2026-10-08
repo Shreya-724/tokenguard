@@ -15,6 +15,13 @@ class SystemClock:
         return time.monotonic()
 
 
+class WallClock:
+    """Wall-clock time (seconds since epoch). Comparable across processes."""
+
+    def now(self) -> float:
+        return time.time()
+
+
 class FakeClock:
     """A clock you control manually. Tests use this instead of time.sleep."""
 
