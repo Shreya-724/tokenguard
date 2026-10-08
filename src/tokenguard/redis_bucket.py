@@ -73,3 +73,24 @@ class NaiveRedisTokenBucket:
     def peek(self, cost: float = 1) -> Decision:
         validate_cost(cost)
         return self._state(False, cost)
+
+
+class RedisTokenBucket:
+    """Read -> compute in Lua -> write back. Safe under concurrency."""
+
+    def __init__(
+        self,
+        client: Any,
+        key: str,
+        capacity: float,
+        refill_rate: float,
+        clock: Clock | None = None,
+        key_prefix: str = "tb:",
+    ) -> None:
+        validate_params(capacity, refill_rate)
+        self._r = client
+        self._key = f"{key_prefix}{key}"
+        self.capacity = float(capacity)
+        self.refill_rate = float(refill_rate)
+        # Wall clock, not monotonic: monotonic values differ between processes.
+        self._clock: Clock = clock or WallClock()
