@@ -4,7 +4,7 @@ import uuid
 import pytest
 import redis
 
-from tokenguard import FakeClock, NaiveRedisTokenBucket, TokenBucket
+from tokenguard import FakeClock, NaiveRedisTokenBucket, TokenBucket,RedisTokenBucket
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
@@ -38,7 +38,7 @@ def key(redis_client):
     redis_client.delete(k)
 
 
-@pytest.fixture(params=["memory", "naive"])  # Day 4: add "lua"
+@pytest.fixture(params=["memory", "naive","lua"])  # Day 4: add "lua"
 def make(request):
     """Factory building a bucket of each implementation: make(clock, cap, rate)."""
     impl = request.param
@@ -53,7 +53,7 @@ def make(request):
     def factory(clock, capacity=10, rate=1):
         k = f"test:{uuid.uuid4().hex}"
         keys.append(k)
-        cls = NaiveRedisTokenBucket  # Day 4: pick RedisTokenBucket when impl == "lua"
+        cls = NaiveRedisTokenBucket if impl == "naive" else RedisTokenBucket 
         return cls(client, k, capacity, rate, clock=clock, key_prefix="")
 
     request.addfinalizer(lambda: keys and client.delete(*keys))

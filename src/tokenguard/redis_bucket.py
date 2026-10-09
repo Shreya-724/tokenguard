@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import math
 from typing import Any
-
+from pathlib import Path
 from tokenguard.bucket import Decision, validate_cost, validate_params
 from tokenguard.clock import Clock, WallClock
 from tokenguard.errors import wrap_redis_errors
+
+_LUA = (Path(__file__).with_name("token_bucket.lua")).read_text()
 
 
 def _ttl(capacity: float, refill_rate: float) -> int:
@@ -76,7 +78,7 @@ class NaiveRedisTokenBucket:
 
 
 class RedisTokenBucket:
-    """Read -> compute in Lua -> write back. Safe under concurrency."""
+    """Atomic token bucket: the whole read-compute-write runs inside Redis (Lua)."""
 
     def __init__(
         self,
@@ -92,5 +94,24 @@ class RedisTokenBucket:
         self._key = f"{key_prefix}{key}"
         self.capacity = float(capacity)
         self.refill_rate = float(refill_rate)
-        # Wall clock, not monotonic: monotonic values differ between processes.
-        self._clock: Clock = clock or WallClock()
+        # clock=None -> Redis TIME (production). A clock is only for tests.
+        self._clock = clock
+        self._script = client.register_script(_LUA)
+
+    def _run(self, cost: float, spend: bool) -> Decision:
+        now = "" if self._clock is None else repr(self._clock.now())
+        allowed, tokens, retry_after = self._script(
+            keys=[self._key],
+            args=[self.capacity, self.refill_rate, cost, now, "1" if spend else "0"],
+        )
+        return Decision(bool(int(allowed)), float(tokens), float(retry_after))
+
+    @wrap_redis_errors
+    def allow(self, cost: float = 1) -> Decision:
+        validate_cost(cost)
+        return self._run(cost, True)
+
+    @wrap_redis_errors
+    def peek(self, cost: float = 1) -> Decision:
+        validate_cost(cost)
+        return self._run(cost, False)
