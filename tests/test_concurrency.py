@@ -1,6 +1,7 @@
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 
 import pytest
+
 from _workers import build, run_batch
 
 CAPACITY = 100

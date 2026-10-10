@@ -12,6 +12,7 @@ def build(impl, url, key, capacity, rate):
     # real clock (WallClock / Redis TIME); key_prefix='' so tests can clean up `key`
     return cls(client, key, capacity, rate, key_prefix="")
 
+
 def run_batch(args):
     """Run in a separate process: make n requests, return how many were allowed."""
     impl, url, key, capacity, rate, n = args
