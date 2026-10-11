@@ -1,4 +1,6 @@
 from django.http import JsonResponse
+from django.utils.decorators import method_decorator
+from django.views import View
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -44,3 +46,13 @@ def config(request):
     except Exception as exc:  # demo only
         redis_ok = f"error: {exc}"
     return JsonResponse({"tokenguard": effective_config(), "redis_ok": redis_ok})
+
+
+@method_decorator(
+    rate_limit(capacity=10, refill_rate=0.05, key="user"), name="dispatch"
+)
+class SummaryView(View):
+    """Class-based view limited via method_decorator on dispatch."""
+
+    def get(self, request):
+        return JsonResponse({"summary": "ok"})

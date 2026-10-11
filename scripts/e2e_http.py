@@ -24,7 +24,9 @@ codes = []
 for i in range(7):
     status, headers, body = get("/login/")
     codes.append(status)
-    print(i + 1, status, headers.get("X-RateLimit-Remaining"), headers.get("Retry-After"))
+    print(
+        i + 1, status, headers.get("X-RateLimit-Remaining"), headers.get("Retry-After")
+    )
 
 assert codes[:5] == [200] * 5, codes
 assert codes[5:] == [429, 429], codes

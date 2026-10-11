@@ -99,9 +99,7 @@ def test_xff_spoofed_left_entries_are_ignored(rf, settings):
 
 def test_xff_skips_chained_trusted_proxies(rf, settings):
     settings.TOKENGUARD = {"TRUSTED_PROXIES": ["10.0.0.0/8"]}
-    req = rf.get(
-        "/", REMOTE_ADDR="10.0.0.1", HTTP_X_FORWARDED_FOR="7.7.7.7, 10.0.0.2"
-    )
+    req = rf.get("/", REMOTE_ADDR="10.0.0.1", HTTP_X_FORWARDED_FOR="7.7.7.7, 10.0.0.2")
     assert keys.client_ip(req) == "7.7.7.7"
 
 

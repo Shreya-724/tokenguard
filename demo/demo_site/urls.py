@@ -14,4 +14,5 @@ urlpatterns = [
         "api/chat/",
         rate_limit(capacity=10, refill_rate=0.1, key="ip")(views.ChatView.as_view()),
     ),
+    path("api/summary/", views.SummaryView.as_view()),
 ]

@@ -150,3 +150,13 @@ def test_bad_fail_mode_is_a_config_error(client, dead_redis):
     dead_redis.TOKENGUARD["FAIL_MODE"] = "banana"
     with pytest.raises(ImproperlyConfigured):
         client.get("/api/ping/")
+
+
+def test_cbv_method_decorator_limited_and_charged_once(client, tg):
+    first = client.get("/api/summary/")
+    assert first["X-RateLimit-Remaining"] == "9"  # charged once, not twice
+    codes = [first.status_code] + [
+        client.get("/api/summary/").status_code for _ in range(11)
+    ]
+    assert codes[:10] == [200] * 10  # capacity 10
+    assert codes[10:] == [429, 429]

@@ -44,5 +44,12 @@ TOKENGUARD = {
             "key": "ip",
             "fail_mode": "closed",  # brute-force protection: never fail open
         },
+        {
+            "name": "chat-api",
+            "match": r"^/api/summary/",
+            "capacity": 30,
+            "refill_rate": 2,
+            "key": "user",
+        },
     ],
 }
