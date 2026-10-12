@@ -40,12 +40,15 @@ def rate_limit(
     def decorator(view: Callable) -> Callable:
         if asyncio.iscoroutinefunction(view):
             raise TypeError("rate_limit does not support async views yet")
+        default_scope = (
+            f"{getattr(view, '__module__', '')}."
+            f"{getattr(view, '__qualname__', 'view')}"
+        )
         rule = Rule(
             capacity=capacity,
             refill_rate=refill_rate,
             key=key_func,
-            scope=scope
-            or f"{getattr(view, '__module__', '')}.{getattr(view, '__qualname__', 'view')}",
+            scope=scope or default_scope,
             fail_mode=fail_mode,
             cost=cost,
         )

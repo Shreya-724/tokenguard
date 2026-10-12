@@ -1,4 +1,4 @@
-"""Django integration for tokenguard (install with: pip install "tokenguard[django]")."""
+"""Django integration for tokenguard."""
 
 from tokenguard.django.decorator import rate_limit
 from tokenguard.django.middleware import TokenGuardMiddleware
