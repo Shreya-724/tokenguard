@@ -31,9 +31,10 @@ def validate_cost(cost: float) -> None:
 
 
 class TokenBucket:
-    """Holds up to `capacity` tokens, refilling at `refill_rate` tokens/second.
+    """A token bucket.
 
-    Each request spends `cost` tokens; if there aren't enough it is rejected.
+    Holds up to `capacity` tokens and refills at `refill_rate` tokens/second.
+    Each request spends `cost` tokens; if there aren't enough, it is rejected.
     """
 
     def __init__(
@@ -46,7 +47,7 @@ class TokenBucket:
         self.capacity = float(capacity)
         self.refill_rate = float(refill_rate)
         self._clock: Clock = clock or SystemClock()
-        self._tokens = self.capacity
+        self._tokens = self.capacity  # starts full
         self._last_refill = self._clock.now()
 
     def _refill(self) -> None:
@@ -78,3 +79,18 @@ class TokenBucket:
         if cost <= self._tokens:
             return Decision(True, self._tokens, 0.0)
         return Decision(False, self._tokens, self._retry_after(cost))
+
+    def adjust(self, delta: float) -> float:
+        """Settle an estimate against real usage. Returns the new balance.
+
+        delta > 0: the request used MORE than it was charged, so charge the extra.
+        delta < 0: it used LESS, so refund the difference.
+
+        Decision: overspend may push the balance negative ("debt") so a request
+        that used more than estimated is still paid for, but the debt is capped
+        at -capacity so one huge overrun cannot lock a client out for hours.
+        Refunds are capped at capacity.
+        """
+        self._refill()
+        self._tokens = max(-self.capacity, min(self.capacity, self._tokens - delta))
+        return self._tokens

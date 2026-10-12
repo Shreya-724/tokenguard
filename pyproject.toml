@@ -21,6 +21,7 @@ dev = [
     "django>=4.2",
     "djangorestframework>=3.14",
 ]
+tiktoken = ["tiktoken>=0.7"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/tokenguard"]

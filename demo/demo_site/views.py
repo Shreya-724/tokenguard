@@ -1,3 +1,5 @@
+import json
+
 from django.http import JsonResponse
 from django.utils.decorators import method_decorator
 from django.views import View
@@ -6,6 +8,8 @@ from rest_framework.views import APIView
 
 from tokenguard.django import rate_limit
 from tokenguard.django.conf import effective_config, get_client
+from tokenguard.django.llm import llm_cost, llm_usage
+from tokenguard.llm import MODELS, estimate_tokens
 
 
 def health(request):
@@ -56,3 +60,58 @@ class SummaryView(View):
 
     def get(self, request):
         return JsonResponse({"summary": "ok"})
+
+
+def _read_completion_request(request):
+    """Validate a JSON completion request. Returns (body, error_response)."""
+    if request.method != "POST":
+        return None, JsonResponse({"error": "POST only"}, status=405)
+    try:
+        body = json.loads(request.body)
+    except ValueError:
+        return None, JsonResponse({"error": "invalid JSON"}, status=400)
+    if not isinstance(body, dict) or not isinstance(body.get("prompt"), str):
+        return None, JsonResponse({"error": "prompt must be a string"}, status=400)
+    if body.get("model", "small") not in MODELS:
+        return None, JsonResponse({"error": "unknown model"}, status=400)
+    return body, None
+
+
+def _mock_usage(body):
+    """Pretend to be the model reporting what it really used."""
+    max_tokens = body.get("max_tokens")
+    default = min(max_tokens, 40) if isinstance(max_tokens, int) else 40
+    return {
+        "prompt_tokens": estimate_tokens(body["prompt"]),
+        "completion_tokens": body.get("mock_completion_tokens", default),
+    }
+
+
+@rate_limit(
+    capacity=10_000,
+    refill_rate=50,
+    key="user",
+    cost=llm_cost(),
+    usage=llm_usage(),
+)
+def complete(request):
+    """Mock LLM: charged by estimated tokens, settled by real usage."""
+    body, error = _read_completion_request(request)
+    if error:
+        return error
+    if body.get("simulate_error"):
+        return JsonResponse({"error": "upstream_failed"}, status=502)
+    return JsonResponse({"text": "This is a canned reply.", "usage": _mock_usage(body)})
+
+
+@rate_limit(capacity=10_000, refill_rate=50, key="user", cost=llm_cost())
+def complete_manual(request):
+    """Same, but the view settles the charge itself."""
+    body, error = _read_completion_request(request)
+    if error:
+        return error
+    usage = _mock_usage(body)
+    charge = getattr(request, "tokenguard", None)
+    if charge:
+        charge.reconcile(usage["prompt_tokens"] + usage["completion_tokens"])
+    return JsonResponse({"text": "This is a canned reply.", "usage": usage})

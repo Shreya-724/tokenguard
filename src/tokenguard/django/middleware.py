@@ -14,15 +14,21 @@ import re
 from typing import Any
 
 from django.urls import Resolver404, resolve
+from django.utils.module_loading import import_string
 
 from tokenguard.django.conf import get_setting
-from tokenguard.django.engine import Rule, add_headers, enforce
+from tokenguard.django.engine import Rule, add_headers, enforce, settle
 from tokenguard.django.keys import resolve_key
 
 
 @functools.lru_cache(maxsize=256)
 def _compile(pattern: str) -> re.Pattern[str]:
     return re.compile(pattern)
+
+
+def _resolve_callable(value: Any) -> Any:
+    """Settings can name a function by dotted path: "myapp.costs.chat_cost"."""
+    return import_string(value) if isinstance(value, str) else value
 
 
 def rule_from_spec(spec: dict[str, Any], scope: str) -> Rule:
@@ -32,7 +38,8 @@ def rule_from_spec(spec: dict[str, Any], scope: str) -> Rule:
         key=resolve_key(spec.get("key")),
         scope=scope,
         fail_mode=spec.get("fail_mode"),
-        cost=spec.get("cost", 1),
+        cost=_resolve_callable(spec.get("cost", 1)),
+        usage=_resolve_callable(spec.get("usage")),
     )
 
 
@@ -45,12 +52,15 @@ class TokenGuardMiddleware:
         if rule is None:
             return self.get_response(request)
 
-        decision, rejection = enforce(request, rule)
-        if rejection is not None:
-            return rejection
+        outcome = enforce(request, rule)
+        if outcome.rejection is not None:
+            return outcome.rejection
         response = self.get_response(request)
-        if decision is not None:
-            add_headers(response, rule, decision)
+        # Django turns view exceptions into 500 responses before they reach us,
+        # so settle() sees them as a 5xx and refunds.
+        settle(request, rule, outcome.charge, response)
+        if outcome.charge is not None:
+            add_headers(response, rule, outcome.charge.remaining)
         return response
 
     @staticmethod

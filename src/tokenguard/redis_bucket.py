@@ -10,7 +10,9 @@ from tokenguard.bucket import Decision, validate_cost, validate_params
 from tokenguard.clock import Clock, WallClock
 from tokenguard.errors import wrap_redis_errors
 
-_LUA = (Path(__file__).with_name("token_bucket.lua")).read_text()
+_HERE = Path(__file__).parent
+_LUA = (_HERE / "token_bucket.lua").read_text(encoding="utf-8")
+_ADJUST_LUA = (_HERE / "token_bucket_adjust.lua").read_text(encoding="utf-8")
 
 
 def _ttl(capacity: float, refill_rate: float) -> int:
@@ -98,12 +100,21 @@ class RedisTokenBucket:
         # clock=None -> Redis TIME (production). A clock is only for tests.
         self._clock = clock
         self._script = client.register_script(_LUA)
+        self._adjust_script = client.register_script(_ADJUST_LUA)
+
+    def _now_arg(self) -> str:
+        return "" if self._clock is None else repr(self._clock.now())
 
     def _run(self, cost: float, spend: bool) -> Decision:
-        now = "" if self._clock is None else repr(self._clock.now())
         allowed, tokens, retry_after = self._script(
             keys=[self._key],
-            args=[self.capacity, self.refill_rate, cost, now, "1" if spend else "0"],
+            args=[
+                self.capacity,
+                self.refill_rate,
+                cost,
+                self._now_arg(),
+                "1" if spend else "0",
+            ],
         )
         return Decision(bool(int(allowed)), float(tokens), float(retry_after))
 
@@ -116,3 +127,16 @@ class RedisTokenBucket:
     def peek(self, cost: float = 1) -> Decision:
         validate_cost(cost)
         return self._run(cost, False)
+
+    @wrap_redis_errors
+    def adjust(self, delta: float) -> float:
+        """Atomically charge (delta > 0) or refund (delta < 0). Returns the balance.
+
+        Same debt rules as TokenBucket.adjust: balance stays within
+        [-capacity, capacity].
+        """
+        result = self._adjust_script(
+            keys=[self._key],
+            args=[self.capacity, self.refill_rate, delta, self._now_arg()],
+        )
+        return float(result)

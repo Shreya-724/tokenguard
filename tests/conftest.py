@@ -38,10 +38,8 @@ def key(redis_client):
     redis_client.delete(k)
 
 
-@pytest.fixture(params=["memory", "naive", "lua"])  # Day 4: add "lua"
-def make(request):
-    """Factory building a bucket of each implementation: make(clock, cap, rate)."""
-    impl = request.param
+def _build_factory(request, impl):
+    """Return factory(clock, capacity, rate) building a bucket of one implementation."""
     if impl == "memory":
         return lambda clock, capacity=10, rate=1: TokenBucket(
             capacity, rate, clock=clock
@@ -58,3 +56,15 @@ def make(request):
 
     request.addfinalizer(lambda: keys and client.delete(*keys))
     return factory
+
+
+@pytest.fixture(params=["memory", "naive", "lua"])
+def make(request):
+    """Every implementation: used by the shared behavior tests."""
+    return _build_factory(request, request.param)
+
+
+@pytest.fixture(params=["memory", "lua"])
+def make_adjustable(request):
+    """Implementations that support adjust() (the naive one deliberately doesn't)."""
+    return _build_factory(request, request.param)

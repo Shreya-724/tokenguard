@@ -7,7 +7,14 @@ import functools
 from collections.abc import Callable
 from typing import Any
 
-from tokenguard.django.engine import Rule, add_headers, enforce
+from tokenguard.django.engine import (
+    CostFunc,
+    Rule,
+    UsageFunc,
+    add_headers,
+    enforce,
+    settle,
+)
 from tokenguard.django.keys import KeyFunc, resolve_key
 
 
@@ -23,17 +30,23 @@ def rate_limit(
     capacity: float,
     refill_rate: float,
     key: str | KeyFunc | None = None,
-    cost: float = 1,
+    cost: float | CostFunc = 1,
     fail_mode: str | None = None,
     scope: str | None = None,
+    usage: UsageFunc | None = None,
 ) -> Callable:
     """Limit a view. The decorator wins over middleware rules for the same view.
 
     key:       "user" (default, falls back to IP), "ip", "api_key", "endpoint",
                "user_endpoint", a dotted path, or any callable(request) -> str.
-    cost:      tokens charged per request.
+    cost:      tokens charged per request: a number, or callable(request) -> number.
+    usage:     optional callable(request, response) -> tokens really used (or None).
+               The difference from the estimate is refunded or charged afterwards.
     fail_mode: "open" or "closed" when Redis is down (default: global setting).
     scope:     bucket namespace; defaults to the view's module + name.
+
+    A cost larger than `capacity` is rejected with 413 (it can never fit).
+    If the view raises, or returns a 5xx, the whole charge is refunded.
     """
     key_func = resolve_key(key)
 
@@ -50,17 +63,23 @@ def rate_limit(
             scope=scope or default_scope,
             fail_mode=fail_mode,
             cost=cost,
+            usage=usage,
         )
 
         @functools.wraps(view)
         def wrapper(*args: Any, **kwargs: Any):
             request = _find_request(args)
-            decision, rejection = enforce(request, rule)
-            if rejection is not None:
-                return rejection
-            response = view(*args, **kwargs)
-            if decision is not None:
-                add_headers(response, rule, decision)
+            outcome = enforce(request, rule)
+            if outcome.rejection is not None:
+                return outcome.rejection
+            try:
+                response = view(*args, **kwargs)
+            except Exception:
+                settle(request, rule, outcome.charge, None)
+                raise
+            settle(request, rule, outcome.charge, response)
+            if outcome.charge is not None:
+                add_headers(response, rule, outcome.charge.remaining)
             return response
 
         # The middleware looks for this marker so it does not charge a second time.
