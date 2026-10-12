@@ -41,8 +41,7 @@ def rate_limit(
         if asyncio.iscoroutinefunction(view):
             raise TypeError("rate_limit does not support async views yet")
         default_scope = (
-            f"{getattr(view, '__module__', '')}."
-            f"{getattr(view, '__qualname__', 'view')}"
+            f"{getattr(view, '__module__', '')}.{getattr(view, '__qualname__', 'view')}"
         )
         rule = Rule(
             capacity=capacity,
