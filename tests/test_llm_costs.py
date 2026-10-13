@@ -75,3 +75,17 @@ def test_register_model_adds_to_the_table():
         assert llm.get_model("tiny") is spec
     finally:
         llm.MODELS.pop("tiny", None)
+
+
+def test_expensive_models_are_weighted_more_heavily():
+    assert llm.get_model("small").weight == 1
+    assert llm.get_model("large").weight == 5
+
+
+def test_estimate_request_splits_input_and_output():
+    est = llm.estimate_request("x" * 400, "small", max_output_tokens=50)
+    assert (est.input_tokens, est.output_tokens, est.tokens) == (100, 50, 150)
+
+
+def test_estimate_request_cost_is_the_total_tokens():
+    assert llm.estimate_request_cost("x" * 400, "small", 50) == 150

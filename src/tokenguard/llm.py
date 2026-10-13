@@ -23,12 +23,13 @@ class ModelSpec:
     default_output_tokens: int  # assumed output when the caller doesn't say
     input_price_per_mtok: float  # dollars per 1,000,000 input tokens
     output_price_per_mtok: float  # dollars per 1,000,000 output tokens
+    weight: float = 1.0  # burst-bucket multiplier: 5.0 means every token counts 5x
 
 
 # ILLUSTRATIVE numbers. Replace them with your provider's real limits and prices.
 MODELS: dict[str, ModelSpec] = {
-    "small": ModelSpec("small", 16_000, 2_000, 256, 0.15, 0.60),
-    "large": ModelSpec("large", 128_000, 8_000, 512, 3.00, 15.00),
+    "small": ModelSpec("small", 16_000, 2_000, 256, 0.15, 0.60, weight=1.0),
+    "large": ModelSpec("large", 128_000, 8_000, 512, 3.00, 15.00, weight=5.0),
 }
 DEFAULT_MODEL = "small"
 
@@ -86,13 +87,23 @@ def estimate_tokens(
     return max(0, int(fn(text, model)))
 
 
-def estimate_request_cost(
+@dataclass(frozen=True)
+class RequestEstimate:
+    input_tokens: int
+    output_tokens: int
+
+    @property
+    def tokens(self) -> int:
+        return self.input_tokens + self.output_tokens
+
+
+def estimate_request(
     prompt: str,
     model: str | None = None,
     max_output_tokens: int | None = None,
     estimator: Estimator | None = None,
-) -> int:
-    """Tokens to charge up front: estimated input + expected output.
+) -> RequestEstimate:
+    """Estimated input and expected output tokens for one request.
 
     The output length is unknown until the model answers, so we charge for what
     the caller allows (max_output_tokens, capped at the model's own limit), or
@@ -103,7 +114,17 @@ def estimate_request_cost(
     if max_output_tokens is None:
         max_output_tokens = spec.default_output_tokens
     output = max(0, min(max_output_tokens, spec.max_output_tokens))
-    return input_tokens + output
+    return RequestEstimate(input_tokens, output)
+
+
+def estimate_request_cost(
+    prompt: str,
+    model: str | None = None,
+    max_output_tokens: int | None = None,
+    estimator: Estimator | None = None,
+) -> int:
+    """Tokens to charge up front: estimated input + expected output."""
+    return estimate_request(prompt, model, max_output_tokens, estimator).tokens
 
 
 def dollar_cost(model: str | None, input_tokens: int, output_tokens: int) -> float:

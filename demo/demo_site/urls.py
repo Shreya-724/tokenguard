@@ -17,4 +17,5 @@ urlpatterns = [
     path("api/summary/", views.SummaryView.as_view()),
     path("api/complete/", views.complete),
     path("api/complete-manual/", views.complete_manual),
+    path("api/budgeted/", views.budgeted),
 ]

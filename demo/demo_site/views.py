@@ -6,9 +6,10 @@ from django.views import View
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from tokenguard.budget import Budget
 from tokenguard.django import rate_limit
 from tokenguard.django.conf import effective_config, get_client
-from tokenguard.django.llm import llm_cost, llm_usage
+from tokenguard.django.llm import llm_cost, llm_usage, user_model
 from tokenguard.llm import MODELS, estimate_tokens
 
 
@@ -87,21 +88,25 @@ def _mock_usage(body):
     }
 
 
-@rate_limit(
-    capacity=10_000,
-    refill_rate=50,
-    key="user",
-    cost=llm_cost(),
-    usage=llm_usage(),
-)
-def complete(request):
-    """Mock LLM: charged by estimated tokens, settled by real usage."""
+def _complete(request):
     body, error = _read_completion_request(request)
     if error:
         return error
     if body.get("simulate_error"):
         return JsonResponse({"error": "upstream_failed"}, status=502)
     return JsonResponse({"text": "This is a canned reply.", "usage": _mock_usage(body)})
+
+
+@rate_limit(
+    capacity=10_000,
+    refill_rate=50,
+    key=user_model,  # a separate burst bucket per (user, model)
+    cost=llm_cost(),  # tokens + dollars + the model's weight (large counts 5x)
+    usage=llm_usage(),  # settle the estimate against the real usage
+)
+def complete(request):
+    """Mock LLM: charged by estimated tokens, settled by real usage."""
+    return _complete(request)
 
 
 @rate_limit(capacity=10_000, refill_rate=50, key="user", cost=llm_cost())
@@ -115,3 +120,22 @@ def complete_manual(request):
     if charge:
         charge.reconcile(usage["prompt_tokens"] + usage["completion_tokens"])
     return JsonResponse({"text": "This is a canned reply.", "usage": usage})
+
+
+@rate_limit(
+    capacity=10_000,
+    refill_rate=50,
+    key=user_model,  # burst: per (user, model) ...
+    budget_key="user",  # ... but ONE budget per user across models
+    cost=llm_cost(),
+    usage=llm_usage(),
+    budget=Budget(  # deliberately tiny, so the demo hits them quickly
+        daily_tokens=1_000,
+        daily_usd=0.01,
+        monthly_tokens=20_000,
+        monthly_usd=0.50,
+    ),
+)
+def budgeted(request):
+    """Same mock, with daily and monthly budgets on top of the burst bucket."""
+    return _complete(request)

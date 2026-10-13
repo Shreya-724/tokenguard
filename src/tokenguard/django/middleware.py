@@ -16,6 +16,7 @@ from typing import Any
 from django.urls import Resolver404, resolve
 from django.utils.module_loading import import_string
 
+from tokenguard.budget import Budget
 from tokenguard.django.conf import get_setting
 from tokenguard.django.engine import Rule, add_headers, enforce, settle
 from tokenguard.django.keys import resolve_key
@@ -32,6 +33,10 @@ def _resolve_callable(value: Any) -> Any:
 
 
 def rule_from_spec(spec: dict[str, Any], scope: str) -> Rule:
+    budget = spec.get("budget")
+    if isinstance(budget, dict):  # {"daily_tokens": 50_000, "monthly_usd": 20}
+        budget = Budget(**budget)
+    budget_key = spec.get("budget_key")
     return Rule(
         capacity=spec["capacity"],
         refill_rate=spec["refill_rate"],
@@ -40,6 +45,8 @@ def rule_from_spec(spec: dict[str, Any], scope: str) -> Rule:
         fail_mode=spec.get("fail_mode"),
         cost=_resolve_callable(spec.get("cost", 1)),
         usage=_resolve_callable(spec.get("usage")),
+        budget=budget,
+        budget_key=resolve_key(budget_key) if budget_key else None,
     )
 
 

@@ -20,6 +20,7 @@ DEFAULTS: dict[str, Any] = {
     "RULES": [],  # per-route overrides, first match wins
     "EXEMPT": [],  # regexes for paths that are never limited
     "TRUSTED_PROXIES": [],  # IPs/CIDRs allowed to set X-Forwarded-For
+    "ON_NEAR_LIMIT": None,  # callable(event) or dotted path, for budget alerts
 }
 
 FAIL_MODES = ("open", "closed")

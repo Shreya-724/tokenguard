@@ -7,6 +7,7 @@ import functools
 from collections.abc import Callable
 from typing import Any
 
+from tokenguard.budget import Budget, Cost
 from tokenguard.django.engine import (
     CostFunc,
     Rule,
@@ -30,25 +31,35 @@ def rate_limit(
     capacity: float,
     refill_rate: float,
     key: str | KeyFunc | None = None,
-    cost: float | CostFunc = 1,
+    cost: float | Cost | CostFunc = 1,
     fail_mode: str | None = None,
     scope: str | None = None,
     usage: UsageFunc | None = None,
+    budget: Budget | None = None,
+    budget_key: str | KeyFunc | None = None,
 ) -> Callable:
     """Limit a view. The decorator wins over middleware rules for the same view.
 
-    key:       "user" (default, falls back to IP), "ip", "api_key", "endpoint",
-               "user_endpoint", a dotted path, or any callable(request) -> str.
-    cost:      tokens charged per request: a number, or callable(request) -> number.
-    usage:     optional callable(request, response) -> tokens really used (or None).
-               The difference from the estimate is refunded or charged afterwards.
-    fail_mode: "open" or "closed" when Redis is down (default: global setting).
-    scope:     bucket namespace; defaults to the view's module + name.
+    key:        "user" (default, falls back to IP), "ip", "api_key", "endpoint",
+                "user_endpoint", "tokenguard.django.llm.user_model" (a bucket per
+                user and model), a dotted path, or any callable(request) -> str.
+    cost:       tokens charged: a number, a Cost (tokens, dollars, model weight),
+                or a callable(request) returning either.
+    usage:      optional callable(request, response) -> tokens really used, or a
+                Usage, or None. The difference from the estimate is refunded or
+                charged afterwards.
+    budget:     optional daily/monthly caps (tokens and/or dollars) that are
+                checked together with the burst bucket, atomically.
+    budget_key: who owns the budget (default: same as key). Use "user" to share
+                one budget across a per-model burst key.
+    fail_mode:  "open" or "closed" when Redis is down (default: global setting).
+    scope:      bucket namespace; defaults to the view's module + name.
 
-    A cost larger than `capacity` is rejected with 413 (it can never fit).
+    A cost larger than a limit can ever hold is rejected with 413.
     If the view raises, or returns a 5xx, the whole charge is refunded.
     """
     key_func = resolve_key(key)
+    budget_key_func = resolve_key(budget_key) if budget_key is not None else None
 
     def decorator(view: Callable) -> Callable:
         if asyncio.iscoroutinefunction(view):
@@ -64,6 +75,8 @@ def rate_limit(
             fail_mode=fail_mode,
             cost=cost,
             usage=usage,
+            budget=budget,
+            budget_key=budget_key_func,
         )
 
         @functools.wraps(view)

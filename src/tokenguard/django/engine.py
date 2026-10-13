@@ -10,8 +10,18 @@ from dataclasses import dataclass
 from typing import Any
 
 from django.http import HttpResponse, JsonResponse
+from django.utils.module_loading import import_string
 
 from tokenguard.bucket import Decision
+from tokenguard.budget import (
+    Budget,
+    BudgetDecision,
+    BudgetedBucket,
+    Cost,
+    Spend,
+    Usage,
+    near_limit_events,
+)
 from tokenguard.django.conf import check_fail_mode, get_client, get_setting
 from tokenguard.django.keys import KeyFunc
 from tokenguard.errors import RedisUnavailableError
@@ -19,8 +29,10 @@ from tokenguard.redis_bucket import RedisTokenBucket
 
 logger = logging.getLogger("tokenguard")
 
-CostFunc = Callable[[Any], float]  # request -> tokens to charge
-UsageFunc = Callable[[Any, Any], "float | None"]  # (request, response) -> actual
+# request -> tokens (a number) or a Cost with dollars and a model weight
+CostFunc = Callable[[Any], "float | Cost"]
+# (request, response) -> tokens really used (a number), a Usage, or None
+UsageFunc = Callable[[Any, Any], "float | Usage | None"]
 
 
 @dataclass(frozen=True)
@@ -30,37 +42,86 @@ class Rule:
     key: KeyFunc
     scope: str  # namespaces the bucket so different rules never share one
     fail_mode: str | None = None  # None -> the global FAIL_MODE setting
-    cost: float | CostFunc = 1  # a number, or a function of the request
+    cost: float | Cost | CostFunc = 1  # a number, a Cost, or a function of the request
     usage: UsageFunc | None = None  # real usage, to settle the estimate afterwards
+    budget: Budget | None = None  # daily / monthly caps on top of the burst bucket
+    budget_key: KeyFunc | None = None  # who owns the budget (default: same as key)
 
-    def cost_for(self, request: Any) -> float:
-        return float(self.cost(request) if callable(self.cost) else self.cost)
+    def cost_for(self, request: Any) -> Cost:
+        value = self.cost(request) if callable(self.cost) else self.cost
+        return value if isinstance(value, Cost) else Cost(float(value))
+
+
+def _notify_near_limit(rule: Rule, identity: str, before: Spend, after: Spend) -> None:
+    events = near_limit_events(rule.budget, before, after) if rule.budget else []
+    if not events:
+        return
+    hook = get_setting("ON_NEAR_LIMIT")
+    if isinstance(hook, str):
+        hook = import_string(hook)
+    for event in events:
+        event = {"scope": rule.scope, "identity": identity, **event}
+        logger.warning("tokenguard near limit: %s", event)
+        if hook is None:
+            continue
+        try:
+            hook(event)
+        except Exception:
+            logger.exception("ON_NEAR_LIMIT hook failed")
 
 
 class Charge:
     """What a request was charged up front, so it can be settled afterwards.
 
     Available to views as `request.tokenguard`:
-        request.tokenguard.reconcile(actual_tokens)
+        request.tokenguard.reconcile(actual_tokens)     # or a Usage(tokens, usd)
     Only the first settlement counts, so calling it twice is harmless.
+    Amounts are raw tokens; the model weight is applied for you.
     """
 
-    def __init__(self, bucket: RedisTokenBucket, cost: float, remaining: float):
+    def __init__(
+        self,
+        bucket: Any,
+        cost: Cost,
+        remaining: float,
+        rule: Rule,
+        identity: str,
+        decision: BudgetDecision | None = None,
+    ):
         self._bucket = bucket
         self.cost = cost
         self.remaining = remaining
         self.settled = False
+        self._finalized = False
+        self._rule = rule
+        self._identity = identity
+        self._periods = decision.periods if decision else None
+        self.spend = decision.spend if decision else None
+        self._spend_before = (
+            decision.spend.minus(cost.tokens, cost.dollars) if decision else None
+        )
 
-    def reconcile(self, actual: float) -> float:
-        """Replace the estimate with real usage. Returns the tokens now left."""
+    def reconcile(self, actual: float | Usage) -> float:
+        """Replace the estimate with real usage. Returns the burst tokens left."""
         if self.settled:
             return self.remaining
         self.settled = True
-        delta = max(0.0, float(actual)) - self.cost  # >0 charge extra, <0 refund
-        if delta == 0:
-            return self.remaining
+        usage = actual if isinstance(actual, Usage) else Usage(float(actual))
+        tokens = max(0.0, usage.tokens)
+        d_burst = tokens * self.cost.weight - self.cost.burst  # >0 charge, <0 refund
         try:
-            self.remaining = self._bucket.adjust(delta)
+            if self._periods is None:
+                if d_burst != 0:
+                    self.remaining = self._bucket.adjust(d_burst)
+            else:
+                d_tokens = tokens - self.cost.tokens
+                d_usd = 0.0
+                if usage.dollars is not None:
+                    d_usd = max(0.0, usage.dollars) - self.cost.dollars
+                if d_burst or d_tokens or d_usd:
+                    self.remaining, self.spend = self._bucket.adjust(
+                        d_burst, d_tokens, d_usd, self._periods
+                    )
         except RedisUnavailableError as exc:
             # The work is already done; never fail the response over bookkeeping.
             logger.warning("Redis unavailable, could not reconcile usage: %s", exc)
@@ -68,7 +129,18 @@ class Charge:
 
     def refund(self) -> float:
         """The request failed: give back everything it was charged."""
-        return self.reconcile(0)
+        return self.reconcile(Usage(0.0, 0.0))
+
+    def finalize(self) -> None:
+        """Request over: raise near-limit alerts based on the FINAL numbers.
+
+        Doing this after settlement avoids false alarms from a pessimistic
+        estimate that was refunded a moment later.
+        """
+        if self._finalized or self._spend_before is None or self.spend is None:
+            return
+        self._finalized = True
+        _notify_near_limit(self._rule, self._identity, self._spend_before, self.spend)
 
 
 @dataclass
@@ -82,7 +154,10 @@ def _num(value: float) -> float | int:
 
 
 def add_headers(response: HttpResponse, rule: Rule, remaining: float) -> None:
-    """X-RateLimit-* headers. Reset = unix time when the bucket is full again."""
+    """X-RateLimit-* headers (about the burst bucket, in weighted tokens).
+
+    Reset = unix time when the bucket is full again.
+    """
     missing = max(0.0, rule.capacity - remaining)
     response["X-RateLimit-Limit"] = str(int(rule.capacity))
     response["X-RateLimit-Remaining"] = str(max(0, math.floor(remaining)))
@@ -91,27 +166,34 @@ def add_headers(response: HttpResponse, rule: Rule, remaining: float) -> None:
     )
 
 
-def too_many_requests(rule: Rule, decision: Decision) -> HttpResponse:
-    """429: the bucket is empty right now. Waiting will help."""
-    response = JsonResponse(
-        {"error": "rate_limited", "retry_after": round(decision.retry_after, 3)},
-        status=429,
-    )
+def too_many_requests(rule: Rule, decision: Decision | BudgetDecision) -> HttpResponse:
+    """429. Either the burst bucket is empty, or a daily/monthly budget is spent."""
+    blocked = getattr(decision, "blocked_by", None)
+    if blocked and blocked != "burst":
+        body = {
+            "error": "budget_exceeded",
+            "limit": blocked,  # e.g. "daily_tokens", "monthly_usd"
+            "retry_after": round(decision.retry_after),
+        }
+    else:
+        body = {"error": "rate_limited", "retry_after": round(decision.retry_after, 3)}
+    response = JsonResponse(body, status=429)
     response["Retry-After"] = str(math.ceil(decision.retry_after))
     add_headers(response, rule, decision.remaining)
     return response
 
 
-def request_too_large(rule: Rule, cost: float) -> HttpResponse:
-    """413: this single request costs more than the bucket can ever hold.
+def request_too_large(rule: Rule, cost: Cost) -> HttpResponse:
+    """413: this single request costs more than a limit can ever hold.
 
     Not a 429 and no Retry-After: waiting will never make it fit. The caller
     has to send a smaller request (shorter prompt or lower max_tokens).
     """
+    shown = cost.burst if cost.burst > rule.capacity else cost.tokens
     response = JsonResponse(
         {
             "error": "request_too_large",
-            "cost": _num(cost),
+            "cost": _num(shown),
             "capacity": _num(rule.capacity),
             "message": "This request needs more tokens than the limit allows "
             "at once. Shorten the prompt or lower max_tokens.",
@@ -126,25 +208,60 @@ def unavailable_response() -> HttpResponse:
     return JsonResponse({"error": "rate_limiter_unavailable"}, status=503)
 
 
+def _never_fits(rule: Rule, cost: Cost) -> bool:
+    if cost.burst > rule.capacity:
+        return True
+    b = rule.budget
+    if b is None:
+        return False
+    caps = (
+        (b.daily_tokens, cost.tokens),
+        (b.monthly_tokens, cost.tokens),
+        (b.daily_usd, cost.dollars),
+        (b.monthly_usd, cost.dollars),
+    )
+    return any(0 < limit < amount for limit, amount in caps)
+
+
 def enforce(request: Any, rule: Rule) -> Outcome:
     """Charge the request against its bucket (before the view runs)."""
     fail_mode = rule.fail_mode or get_setting("FAIL_MODE")
     check_fail_mode(fail_mode)
 
     cost = rule.cost_for(request)
-    if cost > rule.capacity:
+    if _never_fits(rule, cost):
         # Decided locally: it can never fit, so it is rejected even if Redis is down.
         return Outcome(rejection=request_too_large(rule, cost))
 
-    bucket = RedisTokenBucket(
-        get_client(),
-        f"{rule.scope}:{rule.key(request)}",
-        rule.capacity,
-        rule.refill_rate,
-        key_prefix=f"{get_setting('KEY_PREFIX')}:",
-    )
+    identity = rule.key(request)
+    prefix = f"{get_setting('KEY_PREFIX')}:"
+    budget_identity = ""
+    if rule.budget is None:
+        bucket: Any = RedisTokenBucket(
+            get_client(),
+            f"{rule.scope}:{identity}",
+            rule.capacity,
+            rule.refill_rate,
+            key_prefix=prefix,
+        )
+    else:
+        owner = rule.budget_key(request) if rule.budget_key else identity
+        budget_identity = f"{rule.scope}:{owner}"
+        bucket = BudgetedBucket(
+            get_client(),
+            budget_identity,
+            identity,
+            rule.capacity,
+            rule.refill_rate,
+            rule.budget,
+            key_prefix=prefix,
+        )
+
     try:
-        decision = bucket.allow(cost)
+        if rule.budget is None:
+            decision = bucket.allow(cost.burst)
+        else:
+            decision = bucket.charge(cost)
     except RedisUnavailableError as exc:
         if fail_mode == "open":
             logger.warning("Redis unavailable, failing OPEN (%s): %s", rule.scope, exc)
@@ -155,7 +272,14 @@ def enforce(request: Any, rule: Rule) -> Outcome:
     if not decision.allowed:
         return Outcome(rejection=too_many_requests(rule, decision))
 
-    charge = Charge(bucket, cost, decision.remaining)
+    charge = Charge(
+        bucket,
+        cost,
+        decision.remaining,
+        rule,
+        budget_identity,
+        decision if rule.budget is not None else None,
+    )
     request.tokenguard = charge
     return Outcome(charge=charge)
 
@@ -169,17 +293,17 @@ def settle(
     exceptions are refunded in full. Client errors (4xx) stay charged, so
     flooding the API with invalid requests still costs the sender.
     """
-    if charge is None or charge.settled:
+    if charge is None:
         return
-    if response is None or response.status_code >= 500:
-        charge.refund()
-        return
-    if rule.usage is None:
-        return
-    try:
-        actual = rule.usage(request, response)
-    except Exception:
-        logger.exception("tokenguard usage function failed; keeping the estimate")
-        return
-    if actual is not None:
-        charge.reconcile(actual)
+    if not charge.settled:
+        if response is None or response.status_code >= 500:
+            charge.refund()
+        elif rule.usage is not None:
+            try:
+                actual = rule.usage(request, response)
+            except Exception:
+                logger.exception("tokenguard usage function failed; keeping estimate")
+                actual = None
+            if actual is not None:
+                charge.reconcile(actual)
+    charge.finalize()
