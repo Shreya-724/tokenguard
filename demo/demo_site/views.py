@@ -9,7 +9,8 @@ from rest_framework.views import APIView
 from tokenguard.budget import Budget
 from tokenguard.django import rate_limit
 from tokenguard.django.conf import effective_config, get_client
-from tokenguard.django.llm import llm_cost, llm_usage, user_model
+from tokenguard.django.keys import api_key, combine
+from tokenguard.django.llm import llm_cost, llm_usage, model_key, user_model
 from tokenguard.llm import MODELS, estimate_tokens
 
 
@@ -42,25 +43,6 @@ class ChatView(APIView):
 
     def get(self, request):
         return Response({"reply": "hello"})
-
-
-def config(request):
-    """Shows the settings tokenguard is using and whether Redis answers."""
-    try:
-        redis_ok = bool(get_client().ping())
-    except Exception as exc:  # demo only
-        redis_ok = f"error: {exc}"
-    return JsonResponse({"tokenguard": effective_config(), "redis_ok": redis_ok})
-
-
-@method_decorator(
-    rate_limit(capacity=10, refill_rate=0.05, key="user"), name="dispatch"
-)
-class SummaryView(View):
-    """Class-based view limited via method_decorator on dispatch."""
-
-    def get(self, request):
-        return JsonResponse({"summary": "ok"})
 
 
 def _read_completion_request(request):
@@ -125,8 +107,8 @@ def complete_manual(request):
 @rate_limit(
     capacity=10_000,
     refill_rate=50,
-    key=user_model,  # burst: per (user, model) ...
-    budget_key="user",  # ... but ONE budget per user across models
+    key=combine(api_key, model_key()),  # burst: per (API key, model) ...
+    budget_key=api_key,  # ... but ONE budget per API key across models
     cost=llm_cost(),
     usage=llm_usage(),
     budget=Budget(  # deliberately tiny, so the demo hits them quickly
@@ -139,3 +121,104 @@ def complete_manual(request):
 def budgeted(request):
     """Same mock, with daily and monthly budgets on top of the burst bucket."""
     return _complete(request)
+
+
+# ---- Week 4 Day 6: a fake chat-completions API (OpenAI-style) ----
+CHAT_BUDGET = Budget(
+    daily_tokens=50_000,
+    daily_usd=0.25,
+    monthly_tokens=1_000_000,
+    monthly_usd=5.00,
+)
+
+
+def _messages_text(messages):
+    return "\n".join(m["content"] for m in messages)
+
+
+def _read_chat_request(request):
+    """Validate a chat request. Returns (body, error_response)."""
+    if request.method != "POST":
+        return None, JsonResponse({"error": "POST only"}, status=405)
+    try:
+        body = json.loads(request.body)
+    except ValueError:
+        return None, JsonResponse({"error": "invalid JSON"}, status=400)
+    messages = body.get("messages") if isinstance(body, dict) else None
+    valid = (
+        isinstance(messages, list)
+        and messages
+        and all(
+            isinstance(m, dict) and isinstance(m.get("content"), str) for m in messages
+        )
+    )
+    if not valid:
+        message = "messages must be a non-empty list of {role, content}"
+        return None, JsonResponse({"error": message}, status=400)
+    if body.get("model", "small") not in MODELS:
+        return None, JsonResponse({"error": "unknown model"}, status=400)
+    return body, None
+
+
+@rate_limit(
+    capacity=5_000,
+    refill_rate=50,  # 50 tokens/second sustained, 5,000 burst
+    key=combine(api_key, model_key()),  # a bucket per (API key, model)
+    budget_key=api_key,  # one daily/monthly budget per API key
+    budget=CHAT_BUDGET,
+    cost=llm_cost(prompt_field="messages"),
+    usage=llm_usage(),  # settle the estimate with the usage in the response
+)
+def chat(request):
+    """Fake /chat/completions: canned text plus a real-looking usage block.
+
+    Test hooks: "mock_completion_tokens" sets the reported output length and
+    "simulate_error" makes the fake upstream fail with a 502.
+    """
+    body, error = _read_chat_request(request)
+    if error:
+        return error
+    if body.get("simulate_error"):
+        return JsonResponse({"error": "upstream_failed"}, status=502)
+    model = body.get("model", "small")
+    max_tokens = body.get("max_tokens")
+    default = min(max_tokens, 40) if isinstance(max_tokens, int) else 40
+    prompt_tokens = estimate_tokens(_messages_text(body["messages"]), model)
+    completion_tokens = body.get("mock_completion_tokens", default)
+    return JsonResponse(
+        {
+            "model": model,
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "This is a canned reply from the mock model.",
+                    }
+                }
+            ],
+            "usage": {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": prompt_tokens + completion_tokens,
+            },
+        }
+    )
+
+
+@method_decorator(
+    rate_limit(capacity=10, refill_rate=0.05, key="user"), name="dispatch"
+)
+class SummaryView(View):
+    """Class-based view limited via method_decorator on dispatch."""
+
+    def get(self, request):
+        return JsonResponse({"summary": "ok"})
+
+
+def config(request):
+    """Shows the settings tokenguard is using and whether Redis answers."""
+    try:
+        redis_ok = bool(get_client().ping())
+    except Exception as exc:  # demo only
+        redis_ok = f"error: {exc}"
+    return JsonResponse({"tokenguard": effective_config(), "redis_ok": redis_ok})

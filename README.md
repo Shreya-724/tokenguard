@@ -1,51 +1,409 @@
-![CI](https://github.com/<Shreya-724>/tokenguard/actions/workflows/ci.yml/badge.svg)
 # tokenguard
 
-A token-bucket rate limiter with an atomic Lua implementation, tested for correctness under heavy concurrency.
+![CI](https://github.com/<your-username>/tokenguard/actions/workflows/ci.yml/badge.svg)
+
+A **token-aware, Redis-backed rate limiter for Django**, built for LLM APIs.
+Limit clients by *how much they consume*, not just how often they call, with
+atomic correctness under concurrency.
+
+> **Status: work in progress (v0.3.0).** The core limiter, Redis/Lua backend, Django
+> integration and token-aware LLM limiting with budgets are done. More algorithms,
+> metrics and a dashboard are next (see [Roadmap](#roadmap)).
+
+## Why
+
+Plain request-count limiters treat a 50-token call and a 50,000-token call the same,
+but for an LLM API they cost wildly different amounts. tokenguard is built around a
+**token bucket**: each request spends tokens, and the bucket refills at a steady
+rate, so short bursts are fine while the long-run average stays capped.
+
+## Features
+
+- Token bucket with burst capacity, fractional refill, `retry_after` and `peek()`
+- **Atomic Redis backend** (one Lua script), correct across threads, processes and servers
+- Django **decorator** (function views, class-based views, DRF) and **middleware**
+- Per-route rules, an exempt list, and clear precedence
+- Standard headers: `X-RateLimit-*` on every response, `Retry-After` on 429s
+- **Fail-open / fail-closed** when Redis is unreachable, configurable per rule
+- Key functions: per user, IP, API key, endpoint, or any combination
+- Safe client-IP handling (`X-Forwarded-For` is only trusted behind known proxies)
+- **Token-aware LLM limiting**: charge by estimated tokens, then settle with the real
+  usage (refund or charge the difference)
+- **Per-model buckets and cost weights** (the large model can count 5x)
+- **Budgets**: burst, daily and monthly limits in tokens *and dollars*, checked in one
+  atomic Lua call, with a near-limit alert hook
+
+## Quick start (5 minutes)
+
+**1. Run Redis**
+
+```bash
+docker compose up -d
+```
+
+**2. Install**
+
+```bash
+pip install "tokenguard[django]"      # add [drf] for Django REST Framework
+```
+
+**3. Configure Django** (`settings.py`)
+
+```python
+MIDDLEWARE = [
+    # ...
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "tokenguard.django.middleware.TokenGuardMiddleware",  # after authentication
+]
+
+TOKENGUARD = {
+    "REDIS_URL": "redis://localhost:6379/0",
+    "DEFAULT_RULE": {"capacity": 60, "refill_rate": 1},  # burst of 60, then 1/sec
+    "FAIL_MODE": "open",  # or "closed"
+    "KEY_PREFIX": "tg",
+}
+```
+
+Every request is now limited per user (anonymous users per IP).
+
+**4. Limit a single view**
+
+```python
+from tokenguard.django import rate_limit
+
+
+@rate_limit(capacity=20, refill_rate=0.5, key="user", cost=5)
+def generate_report(request): ...
+```
+
+**5. Try it**
+
+```bash
+curl -i localhost:8000/login/     # repeat 6 times: the 6th is a 429
+```
+
+```
+HTTP/1.1 429 Too Many Requests
+Retry-After: 10
+X-RateLimit-Limit: 5
+X-RateLimit-Remaining: 0
+X-RateLimit-Reset: 1760000010
+
+{"error": "rate_limited", "retry_after": 9.874}
+```
+
+## Token-aware limiting for LLM APIs
+
+A request is charged by what it is expected to cost, not as "1 request":
+
+```python
+from tokenguard.budget import Budget
+from tokenguard.django import rate_limit
+from tokenguard.django.keys import api_key, combine
+from tokenguard.django.llm import llm_cost, llm_usage, model_key
+
+
+@rate_limit(
+    capacity=5_000,  # burst, in tokens
+    refill_rate=50,  # 50 tokens/second sustained
+    key=combine(api_key, model_key()),  # a bucket per (API key, model)
+    budget_key=api_key,  # one budget per API key
+    cost=llm_cost(prompt_field="messages"),  # input + expected output tokens
+    usage=llm_usage(),  # settle with the usage in the response
+    budget=Budget(
+        daily_tokens=50_000, daily_usd=0.25, monthly_tokens=1_000_000, monthly_usd=5.00
+    ),
+)
+def chat(request): ...
+```
+
+**1. Estimate and charge up front.** `cost = estimated input tokens + expected output
+tokens` (about 4 characters per token, or plug in tiktoken with `set_estimator`). The
+output is whatever `max_tokens` allows, or the model's default. The model table
+(`tokenguard.llm.MODELS`) holds each model's limits, prices and weight.
+
+**2. Reject what can never fit.** A request that costs more than the bucket (or a
+budget) can ever hold gets `413 request_too_large` with no `Retry-After`: waiting would
+not help, the caller must send less. Everything else that is too much *right now* gets
+`429` with a `Retry-After`.
+
+**3. Reconcile after the call.** The response's real usage replaces the estimate: an
+unused part is refunded, an overshoot is charged. Overspend may put the bucket into
+*debt*, capped at one bucket's worth, so a single huge reply delays the next request
+but cannot lock a user out for hours. Server errors (5xx) and crashed views are
+refunded in full; client errors (4xx) stay charged. Details and every edge case:
+[docs/cost-model.md](docs/cost-model.md).
+
+**4. Weights and isolation.** Each `(user, model)` pair has its own bucket, and a model
+can have a weight: with `large` at 5x, 2,000 tokens cost 10,000 bucket tokens. Heavy
+use of the large model never blocks the small one.
+
+**5. Budgets, all or nothing.** Daily and monthly caps (UTC) in tokens and dollars sit
+on top of the burst bucket. One Lua script checks and charges every layer together, so
+a request is never half-charged, and exceeding the daily cap blocks a request even when
+the burst bucket still has tokens:
+
+```
+HTTP/1.1 429 Too Many Requests
+Retry-After: 41230
+
+{"error": "budget_exceeded", "limit": "daily_tokens", "retry_after": 41230}
+```
+
+**6. Near-limit alerts.** When a budget crosses 80% (`Budget(near_limit=0.8)`), tokenguard logs a warning and
+calls your hook once:
+
+```python
+TOKENGUARD = {
+    # ...
+    "ON_NEAR_LIMIT": "myapp.alerts.notify",  # or any callable(event: dict)
+}
+
+
+def notify(event):
+    # {"scope": ..., "identity": ..., "layer": "daily", "metric": "tokens",
+    #  "used": 41_000, "limit": 50_000, "fraction": 0.82}
+    send_slack(f"{event['identity']} is at {event['fraction']:.0%} of its daily budget")
+```
+
+Alerts use the numbers *after* reconciliation, so an over-cautious estimate that was
+refunded a moment later does not raise a false alarm.
+
+### Try it: the 2-minute demo
+
+```bash
+docker compose up -d
+python demo/manage.py runserver          # terminal 1
+python scripts/demo_llm.py               # terminal 2
+```
+
+The demo talks to a fake chat API (`/api/llm/chat/`, canned text plus a `usage` block):
+
+```
+1. Alice sends small prompts: all fine
+  alice    small prompt                       200  tokens left:   4959
+2. Mallory sends huge prompts (~4,000 tokens each)
+  mallory  huge prompt                        200  tokens left:    960
+  mallory  huge prompt                        429  tokens left:    960  <- blocked (burst bucket empty), retry in 63s
+3. Alice again: unaffected, she has her own bucket
+4. Mallory tries a monster prompt: rejected for good, not 'try later'
+  mallory  monster prompt                     413  <- 25,000 tokens can never fit in 5,000
+5. Mallory's small bucket is empty, but the large model has its own
+6. Budgets: a daily cap blocks even when the burst bucket has tokens
+```
+
+(Replace this block with your own real output after running it.)
+
+### Known limitation: streaming
+
+With streamed responses the real usage only arrives in the last chunk, after the
+response has started. tokenguard can then only keep the up-front estimate, unless your
+code calls `request.tokenguard.reconcile(usage)` when the stream ends. Settling
+automatically at the end of a stream is future work.
+
+## Configuration reference
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `REDIS_URL` | `redis://localhost:6379/0` | Redis connection URL |
+| `DEFAULT_RULE` | `{"capacity": 60, "refill_rate": 1}` | Rule applied to every request by the middleware |
+| `FAIL_MODE` | `"open"` | What to do if Redis is down: `"open"` or `"closed"` |
+| `KEY_PREFIX` | `"tg"` | Prefix for all Redis keys |
+| `REDIS_TIMEOUT` | `0.25` | Seconds for Redis connect and each command |
+| `RULES` | `[]` | Per-route overrides (below); first match wins |
+| `EXEMPT` | `[]` | Regexes for paths that are never limited |
+| `TRUSTED_PROXIES` | `[]` | IPs/CIDRs allowed to set `X-Forwarded-For` |
+| `ON_NEAR_LIMIT` | `None` | Callable (or dotted path) called when a budget passes 80% |
+
+`capacity` is the burst size, `refill_rate` is tokens per second.
+
+**Per-route rules**
+
+```python
+TOKENGUARD = {
+    "EXEMPT": [r"^/health/", r"^/static/"],
+    "RULES": [
+        {
+            "name": "login",  # names the bucket; keep it stable
+            "match": r"^/login/",  # matched from the start of the path
+            "capacity": 5,
+            "refill_rate": 0.1,  # one new attempt every 10 seconds
+            "key": "ip",
+            "fail_mode": "closed",
+        },
+    ],
+}
+```
+
+**Precedence, highest first:** exempt path, then `@rate_limit` on the view, then the
+first matching `RULES` entry, then `DEFAULT_RULE`. A decorated view is charged once,
+by the decorator only.
+
+## Key functions
+
+A key function turns a request into the identity that gets its own bucket.
+
+| Name | Bucket per | Example |
+|---|---|---|
+| `"user"` (default) | logged-in user, anonymous users fall back to IP | `user:42` |
+| `"ip"` | client IP | `ip:203.0.113.7` |
+| `"api_key"` | API key from `X-API-Key` (stored hashed) | `apikey:9f2c...` |
+| `"endpoint"` | URL pattern, shared by everyone | `/api/chat/` |
+| `"user_endpoint"` | user and endpoint | `user:42:/api/chat/` |
+
+Use any callable too: `key=lambda request: request.headers["X-Org-Id"]`, or a dotted
+path string. Combine built-ins with `tokenguard.django.keys.combine(...)`.
+
+## Response headers
+
+| Header | On | Meaning |
+|---|---|---|
+| `X-RateLimit-Limit` | all responses | Bucket capacity |
+| `X-RateLimit-Remaining` | all responses | Whole tokens left |
+| `X-RateLimit-Reset` | all responses | Unix time when the bucket is full again |
+| `Retry-After` | 429 only | Whole seconds to wait, rounded up (for a budget: until the next UTC midnight or month) |
+
+If Redis is down and the limiter fails open, no `X-RateLimit-*` headers are sent
+(no decision was made).
+
+## Fail-open vs fail-closed
+
+If Redis is unreachable (timeouts are short, `REDIS_TIMEOUT`):
+
+- **`open`**: the request goes through and a warning is logged. Choose this for
+  public reads, where availability matters more than a few extra requests.
+- **`closed`**: the request gets `503`. Choose this where abuse is costly: login
+  endpoints (brute force), expensive or paid operations.
+
+Set a global default with `FAIL_MODE` and override it per rule or decorator with
+`fail_mode=`.
+
+## Client IP and `X-Forwarded-For`
+
+`X-Forwarded-For` is a normal header, so any client can send a fake one. If it were
+trusted blindly, an attacker could rotate fake IPs and never be limited.
+tokenguard **ignores it** unless the direct peer is listed in `TRUSTED_PROXIES`. It
+then reads the header from the right and takes the first address that is not one of
+your own proxies.
+
+## How a token bucket works
+
+A bucket holds up to `capacity` tokens and refills at `refill_rate` per second. Each
+request spends tokens. If the bucket has enough, the request is allowed; otherwise it
+is rejected with a `retry_after`.
+
+Example with capacity 10 and refill 1/sec:
+
+- t=0: 10 tokens. 10 requests arrive together, all allowed, 0 left
+- t=0: an 11th request is rejected, `retry_after` = 1.0s
+- t=3: 3 tokens have refilled, so a cost-3 request is allowed
+- t=1h: the bucket is back to 10, never more (capped at capacity)
+
+Bursts are allowed up to `capacity`, while the long-run average is limited to
+`refill_rate`.
+
+**Why not a fixed window?** A fixed window lets a client send a full quota at the end
+of one window and another at the start of the next, doubling the limit in a short
+span. A token bucket refills smoothly, so the limit holds over any time span while
+still allowing controlled bursts. It also needs only two numbers per client (tokens
+and last-refill time), which makes it cheap to store in Redis.
+
+## Architecture
+
+```
+request -> Django middleware / @rate_limit -> key function -> RedisTokenBucket
+                                                                  |
+                                                     one Lua script, atomic
+                                                                  |
+                                                               Redis
+```
+
+- **In-memory `TokenBucket`**: single process, used for tests and as the reference
+  implementation. Uses an injectable clock, so tests never call `sleep`.
+- **`RedisTokenBucket`**: shared by every process and server. One Redis hash per
+  bucket (`tokens`, `ts`), with a TTL so idle buckets disappear.
+- Both implementations run the **same test suite**, so they are guaranteed to agree.
 
 ## Correctness under concurrency
 
-1,000 requests, 50 threads / 8 processes, bucket capacity 100:
+My first Redis version read the bucket, calculated in Python and wrote it back. Under
+concurrency, two requests could read the same token count before either wrote back,
+so both spent the same token. This is a check-then-act race.
 
-| Implementation | Mode | Allowed (expected 100) | Over limit by |
-|----------------|------|------------------------|---------------|
-| Naive (read, compute, write) | threads | **1000** | **900** |
-| Atomic Lua script | threads | **exactly 100** | 0 |
-| Atomic Lua script | processes | **exactly 100** | 0 |
+1,000 requests against a bucket with capacity 100:
 
-The naive implementation reads the bucket, computes the new value, and writes it back as separate steps. Concurrent callers all read the same state before any of them writes, so every request is allowed and the limit is blown by 900. The Lua script runs the read, compute, and write as a single atomic operation on the server, so exactly `capacity` requests get through, every time.
+| Implementation | Threads (50) | Processes (8) |
+|---|---|---|
+| Naive (read, compute, write) | `<N>` allowed | `<N>` allowed |
+| Atomic Lua script | exactly 100, every run | exactly 100, every run |
 
-## Test results
+The fix moves the whole read-compute-write into one Lua script, which Redis executes
+atomically. See [docs/race-condition.md](docs/race-condition.md) for the reproduction.
 
-- `pytest tests/test_concurrency.py -v`: **25 passed** (20 thread runs + 5 process runs of the "exactly capacity allowed" test).
-- Stress loop: the whole concurrency suite was run **20 times in a row** with no failures (25/25 passed each time, roughly 22 to 40 seconds per run). That is 500 test executions with zero flakes.
+## Design decisions
 
-## Reproduce
+- **Lua script for atomicity.** One round trip, and no other client can run between
+  the read and the write. Downside: logic lives in a second language that is harder
+  to debug and test, and a slow script blocks Redis.
+- **Redis `TIME` for the clock.** All app servers share one clock, so clock skew
+  between servers cannot create or destroy tokens. (Tests can pass a fake clock.)
+- **Fail-open / fail-closed is configurable**, because the right answer differs by
+  endpoint.
+- **`endpoint` keys use the URL pattern, not the raw path**, so `/items/1` and
+  `/items/2` share a bucket and attackers cannot mint endless buckets.
+- **API keys are hashed** before they become part of a Redis key.
+- **Charge an estimate, then reconcile.** The real token count is only known after the
+  model answers, but the limit must be enforced before it runs. So tokenguard charges a
+  pessimistic estimate up front and settles the difference afterwards.
+- **Bounded debt, not clamp-to-zero.** Clamping would let a user send one enormous reply
+  for free; unbounded debt could lock them out for hours. The floor is one bucket.
+- **One Lua call for all layers.** Burst, daily and monthly counters share a Redis Cluster
+  hash tag and are checked and charged together, so a rejected request leaves no trace.
+- **The engine applies model weights**, so views and usage hooks only ever deal with
+  raw tokens.
+
+## Running the demo and tests
 
 ```bash
-# Run the concurrency tests
-pytest tests/test_concurrency.py -v
+git clone https://github.com/<your-username>/tokenguard && cd tokenguard
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+docker compose up -d
 
-# Race demos
-python scripts/race_demo.py --impl lua --mode threads
-python scripts/race_demo.py --impl lua --mode processes
-python scripts/race_demo.py --impl naive --mode threads     # for contrast
+python demo/manage.py runserver        # then try the curl above
+pytest                                 # unit, shared, concurrency and Django tests
+python scripts/latency.py              # per-call latency (localhost Redis)
+python scripts/demo_llm.py             # the LLM demo (server must be running)
 ```
 
-Expected output:
+Demo endpoints: `/api/ping/` (default rule), `/api/report/` (decorator, costs 5
+tokens), `/login/` (route rule, fail-closed), `/api/chat/` (DRF view),
+`/health/` (exempt), `/api/config/` (shows the active settings), and the mock LLM
+API: `/api/llm/chat/`, `/api/complete/`, `/api/complete-manual/`, `/api/budgeted/`.
 
-```
-impl=lua mode=threads capacity=100 requests=1000 allowed=100 over_limit_by=0
-impl=lua mode=processes capacity=100 requests=1000 allowed=100 over_limit_by=0
-impl=naive mode=threads capacity=100 requests=1000 allowed=1000 over_limit_by=900
-```
+## Limitations
 
-To repeat the stress loop (PowerShell):
+- Django views must be synchronous (async views are not supported yet).
+- With `open` mode and Redis down, each request waits up to `REDIS_TIMEOUT` before
+  being let through; there is no circuit breaker yet.
+- For DRF views that authenticate inside DRF (token or JWT) and need per-user limits,
+  decorate the handler method and add the path to `EXEMPT` so the middleware does not
+  charge it too. The decorator is only auto-detected on the view function itself,
+  for example when it wraps `as_view()` in `urls.py` or `dispatch` via
+  `method_decorator`.
+- Single Redis node; Redis Cluster is untested (keys use hash tags, so it should work).
+- Streaming responses are only settled if your code calls `reconcile` itself.
+- Token counts are an estimate (about 4 characters per token) unless you plug in a real
+  tokenizer, and prices in the model table are illustrative: use your provider's.
+- Budget periods are UTC days and months.
 
-```powershell
-for ($i=1; $i -le 20; $i++) { pytest -q tests/test_concurrency.py; if ($LASTEXITCODE -ne 0) { break } }
-```
+## Roadmap
 
-## Environment
-
-Tested on Windows with Python 3.11.4 and pytest 9.1.1.
+- [x] Week 1: in-memory token bucket, fake clock, CI
+- [x] Week 2: Redis + atomic Lua, race condition proven and fixed
+- [x] Week 3: Django decorator, middleware, headers, fail modes
+- [x] Week 4: LLM token-aware charging, per-model buckets, budgets, mock LLM demo
+- [ ] Week 5: more algorithms and one original feature
+- [ ] Week 6: metrics and React dashboard
+- [ ] Week 7: load tests and hardening
+- [ ] Week 8: PyPI release and write-up
