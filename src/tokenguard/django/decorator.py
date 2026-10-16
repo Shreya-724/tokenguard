@@ -37,6 +37,7 @@ def rate_limit(
     usage: UsageFunc | None = None,
     budget: Budget | None = None,
     budget_key: str | KeyFunc | None = None,
+    algorithm: str | None = None,
 ) -> Callable:
     """Limit a view. The decorator wins over middleware rules for the same view.
 
@@ -52,6 +53,8 @@ def rate_limit(
                 checked together with the burst bucket, atomically.
     budget_key: who owns the budget (default: same as key). Use "user" to share
                 one budget across a per-model burst key.
+    algorithm:  "token_bucket" or "fixed_window" (default: the ALGORITHM setting).
+                Budgets always use the token bucket.
     fail_mode:  "open" or "closed" when Redis is down (default: global setting).
     scope:      bucket namespace; defaults to the view's module + name.
 
@@ -77,6 +80,7 @@ def rate_limit(
             usage=usage,
             budget=budget,
             budget_key=budget_key_func,
+            algorithm=algorithm,
         )
 
         @functools.wraps(view)
@@ -92,7 +96,12 @@ def rate_limit(
                 raise
             settle(request, rule, outcome.charge, response)
             if outcome.charge is not None:
-                add_headers(response, rule, outcome.charge.remaining)
+                add_headers(
+                    response,
+                    rule,
+                    outcome.charge.remaining,
+                    outcome.charge.reset_after,
+                )
             return response
 
         # The middleware looks for this marker so it does not charge a second time.

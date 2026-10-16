@@ -9,6 +9,7 @@ urlpatterns = [
     path("api/ping/", views.ping),
     path("api/report/", views.report),
     path("api/config/", views.config),
+    path("api/fixed/", views.fixed),
     path("login/", views.login),
     path(
         "api/chat/",

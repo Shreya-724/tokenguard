@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import logging
 import math
 import time
@@ -12,6 +13,7 @@ from typing import Any
 from django.http import HttpResponse, JsonResponse
 from django.utils.module_loading import import_string
 
+from tokenguard.algorithms import Algorithm, Limit, algorithm_names, get_algorithm
 from tokenguard.bucket import Decision
 from tokenguard.budget import (
     Budget,
@@ -22,10 +24,14 @@ from tokenguard.budget import (
     Usage,
     near_limit_events,
 )
-from tokenguard.django.conf import check_fail_mode, get_client, get_setting
+from tokenguard.django.conf import (
+    check_algorithm,
+    check_fail_mode,
+    get_client,
+    get_setting,
+)
 from tokenguard.django.keys import KeyFunc
 from tokenguard.errors import RedisUnavailableError
-from tokenguard.redis_bucket import RedisTokenBucket
 
 logger = logging.getLogger("tokenguard")
 
@@ -46,6 +52,19 @@ class Rule:
     usage: UsageFunc | None = None  # real usage, to settle the estimate afterwards
     budget: Budget | None = None  # daily / monthly caps on top of the burst bucket
     budget_key: KeyFunc | None = None  # who owns the budget (default: same as key)
+    algorithm: str | None = None  # None -> the global ALGORITHM setting
+
+    def __post_init__(self) -> None:
+        if self.algorithm is not None and self.algorithm not in algorithm_names():
+            raise ValueError(
+                f"unknown algorithm {self.algorithm!r}; "
+                f"choose one of {algorithm_names()}"
+            )
+        if self.budget is not None and self.algorithm not in (None, "token_bucket"):
+            raise ValueError(
+                "budgets are built on the token bucket; "
+                f"algorithm={self.algorithm!r} cannot be combined with a budget"
+            )
 
     def cost_for(self, request: Any) -> Cost:
         value = self.cost(request) if callable(self.cost) else self.cost
@@ -87,10 +106,12 @@ class Charge:
         rule: Rule,
         identity: str,
         decision: BudgetDecision | None = None,
+        reset_after: float | None = None,
     ):
         self._bucket = bucket
         self.cost = cost
         self.remaining = remaining
+        self.reset_after = reset_after  # None: derived from the refill rate
         self.settled = False
         self._finalized = False
         self._rule = rule
@@ -153,17 +174,22 @@ def _num(value: float) -> float | int:
     return int(value) if float(value).is_integer() else value
 
 
-def add_headers(response: HttpResponse, rule: Rule, remaining: float) -> None:
-    """X-RateLimit-* headers (about the burst bucket, in weighted tokens).
+def add_headers(
+    response: HttpResponse,
+    rule: Rule,
+    remaining: float,
+    reset_after: float | None = None,
+) -> None:
+    """X-RateLimit-* headers (about the burst limit, in weighted tokens).
 
-    Reset = unix time when the bucket is full again.
+    Reset = unix time when the limit is full again. A fixed window knows that
+    (its window ends); for a token bucket it is worked out from the refill rate.
     """
-    missing = max(0.0, rule.capacity - remaining)
+    if reset_after is None:
+        reset_after = max(0.0, rule.capacity - remaining) / rule.refill_rate
     response["X-RateLimit-Limit"] = str(int(rule.capacity))
     response["X-RateLimit-Remaining"] = str(max(0, math.floor(remaining)))
-    response["X-RateLimit-Reset"] = str(
-        math.ceil(time.time() + missing / rule.refill_rate)
-    )
+    response["X-RateLimit-Reset"] = str(math.ceil(time.time() + reset_after))
 
 
 def too_many_requests(rule: Rule, decision: Decision | BudgetDecision) -> HttpResponse:
@@ -179,7 +205,9 @@ def too_many_requests(rule: Rule, decision: Decision | BudgetDecision) -> HttpRe
         body = {"error": "rate_limited", "retry_after": round(decision.retry_after, 3)}
     response = JsonResponse(body, status=429)
     response["Retry-After"] = str(math.ceil(decision.retry_after))
-    add_headers(response, rule, decision.remaining)
+    add_headers(
+        response, rule, decision.remaining, getattr(decision, "reset_after", None)
+    )
     return response
 
 
@@ -206,6 +234,31 @@ def request_too_large(rule: Rule, cost: Cost) -> HttpResponse:
 
 def unavailable_response() -> HttpResponse:
     return JsonResponse({"error": "rate_limiter_unavailable"}, status=503)
+
+
+@functools.lru_cache(maxsize=32)
+def _algorithm(name: str, client: Any, prefix: str) -> Algorithm:
+    """One algorithm object per (name, client, prefix), so scripts load once."""
+    return get_algorithm(name, client, key_prefix=prefix)
+
+
+class _Bound:
+    """An algorithm bound to one key and limit, shaped like a bucket.
+
+    Gives Charge the allow() and adjust() calls it needs, whichever algorithm
+    sits underneath.
+    """
+
+    def __init__(self, algorithm: Algorithm, key: str, limit: Limit):
+        self._algorithm = algorithm
+        self._key = key
+        self._limit = limit
+
+    def allow(self, cost: float) -> Decision:
+        return self._algorithm.check(self._key, cost, self._limit)
+
+    def adjust(self, delta: float) -> float:
+        return self._algorithm.adjust(self._key, delta, self._limit)
 
 
 def _never_fits(rule: Rule, cost: Cost) -> bool:
@@ -237,12 +290,12 @@ def enforce(request: Any, rule: Rule) -> Outcome:
     prefix = f"{get_setting('KEY_PREFIX')}:"
     budget_identity = ""
     if rule.budget is None:
-        bucket: Any = RedisTokenBucket(
-            get_client(),
+        name = rule.algorithm or get_setting("ALGORITHM")
+        check_algorithm(name)
+        bucket: Any = _Bound(
+            _algorithm(name, get_client(), prefix),
             f"{rule.scope}:{identity}",
-            rule.capacity,
-            rule.refill_rate,
-            key_prefix=prefix,
+            Limit(rule.capacity, rule.refill_rate),
         )
     else:
         owner = rule.budget_key(request) if rule.budget_key else identity
@@ -279,6 +332,7 @@ def enforce(request: Any, rule: Rule) -> Outcome:
         rule,
         budget_identity,
         decision if rule.budget is not None else None,
+        getattr(decision, "reset_after", None),
     )
     request.tokenguard = charge
     return Outcome(charge=charge)

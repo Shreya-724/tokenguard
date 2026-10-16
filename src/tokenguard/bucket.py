@@ -15,6 +15,9 @@ class Decision:
     allowed: bool
     remaining: float
     retry_after: float  # seconds until enough tokens exist (inf if never)
+    # Seconds until the limit has fully reset, when the algorithm knows it (a
+    # fixed window does). None: work it out from the refill rate (token bucket).
+    reset_after: float | None = None
 
 
 def validate_params(capacity: float, refill_rate: float) -> None:

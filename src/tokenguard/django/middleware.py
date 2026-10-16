@@ -47,6 +47,7 @@ def rule_from_spec(spec: dict[str, Any], scope: str) -> Rule:
         usage=_resolve_callable(spec.get("usage")),
         budget=budget,
         budget_key=resolve_key(budget_key) if budget_key else None,
+        algorithm=spec.get("algorithm"),
     )
 
 
@@ -67,7 +68,9 @@ class TokenGuardMiddleware:
         # so settle() sees them as a 5xx and refunds.
         settle(request, rule, outcome.charge, response)
         if outcome.charge is not None:
-            add_headers(response, rule, outcome.charge.remaining)
+            add_headers(
+                response, rule, outcome.charge.remaining, outcome.charge.reset_after
+            )
         return response
 
     @staticmethod

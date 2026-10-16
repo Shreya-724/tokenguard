@@ -30,6 +30,12 @@ def report(request):
     return JsonResponse({"report": "generated"})
 
 
+@rate_limit(capacity=5, refill_rate=0.001, key="ip", algorithm="fixed_window")
+def fixed(request):
+    """A fixed window: 5 requests per window (5 / 0.001 = 5,000 seconds)."""
+    return JsonResponse({"algorithm": "fixed_window"})
+
+
 def login(request):
     """Login-style endpoint: limited by the "login" entry in RULES."""
     return JsonResponse({"ok": True})
