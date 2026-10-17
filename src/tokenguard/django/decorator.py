@@ -89,16 +89,17 @@ def rate_limit(
             outcome = enforce(request, rule)
             if outcome.rejection is not None:
                 return outcome.rejection
+            applied = outcome.rule or rule  # live changes may have altered the rule
             try:
                 response = view(*args, **kwargs)
             except Exception:
-                settle(request, rule, outcome.charge, None)
+                settle(request, applied, outcome.charge, None)
                 raise
-            settle(request, rule, outcome.charge, response)
+            settle(request, applied, outcome.charge, response)
             if outcome.charge is not None:
                 add_headers(
                     response,
-                    rule,
+                    applied,
                     outcome.charge.remaining,
                     outcome.charge.reset_after,
                 )

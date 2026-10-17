@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import functools
 import logging
 import math
@@ -28,6 +29,7 @@ from tokenguard.django.conf import (
     check_algorithm,
     check_fail_mode,
     get_client,
+    get_rule_store,
     get_setting,
 )
 from tokenguard.django.keys import KeyFunc
@@ -53,6 +55,7 @@ class Rule:
     budget: Budget | None = None  # daily / monthly caps on top of the burst bucket
     budget_key: KeyFunc | None = None  # who owns the budget (default: same as key)
     algorithm: str | None = None  # None -> the global ALGORITHM setting
+    rules_version: int | None = None  # set when live rules are on: their version
 
     def __post_init__(self) -> None:
         if self.algorithm is not None and self.algorithm not in algorithm_names():
@@ -168,6 +171,7 @@ class Charge:
 class Outcome:
     rejection: HttpResponse | None = None  # a ready 413/429/503, or None to proceed
     charge: Charge | None = None  # None if rejected, or Redis was down (fail-open)
+    rule: Rule | None = None  # the rule actually applied (live changes included)
 
 
 def _num(value: float) -> float | int:
@@ -190,6 +194,8 @@ def add_headers(
     response["X-RateLimit-Limit"] = str(int(rule.capacity))
     response["X-RateLimit-Remaining"] = str(max(0, math.floor(remaining)))
     response["X-RateLimit-Reset"] = str(math.ceil(time.time() + reset_after))
+    if rule.rules_version is not None:
+        response["X-TokenGuard-Rules-Version"] = str(rule.rules_version)
 
 
 def too_many_requests(rule: Rule, decision: Decision | BudgetDecision) -> HttpResponse:
@@ -276,8 +282,44 @@ def _never_fits(rule: Rule, cost: Cost) -> bool:
     return any(0 < limit < amount for limit, amount in caps)
 
 
+def _effective_rule(rule: Rule) -> Rule:
+    """The rule with any live override applied (a no-op unless LIVE_RULES)."""
+    if not get_setting("LIVE_RULES"):
+        return rule
+    try:
+        rules = get_rule_store().snapshot()
+    except Exception:  # live rules must never take the limiter down
+        logger.exception("tokenguard: live rules failed; using the configured rule")
+        return rule
+    changes: dict[str, Any] = {}
+    if rules.loaded:
+        changes["rules_version"] = rules.version
+    override = rules.overrides.get(rule.scope)
+    if override is not None:
+        for name in ("capacity", "refill_rate", "algorithm"):
+            value = getattr(override, name)
+            if value is not None:
+                changes[name] = value
+    try:
+        return dataclasses.replace(rule, **changes)
+    except ValueError as exc:  # e.g. a fixed window asked for on a budgeted rule
+        logger.warning("tokenguard: ignoring live rule for %r: %s", rule.scope, exc)
+        return dataclasses.replace(rule, rules_version=changes.get("rules_version"))
+
+
 def enforce(request: Any, rule: Rule) -> Outcome:
-    """Charge the request against its bucket (before the view runs)."""
+    """Charge the request against its bucket (before the view runs).
+
+    The returned Outcome carries the rule that was really applied, which differs
+    from `rule` when a live change is in effect: use it for headers and settling.
+    """
+    rule = _effective_rule(rule)
+    outcome = _enforce(request, rule)
+    outcome.rule = rule
+    return outcome
+
+
+def _enforce(request: Any, rule: Rule) -> Outcome:
     fail_mode = rule.fail_mode or get_setting("FAIL_MODE")
     check_fail_mode(fail_mode)
 

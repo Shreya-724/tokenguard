@@ -63,13 +63,14 @@ class TokenGuardMiddleware:
         outcome = enforce(request, rule)
         if outcome.rejection is not None:
             return outcome.rejection
+        applied = outcome.rule or rule  # live changes may have altered the rule
         response = self.get_response(request)
         # Django turns view exceptions into 500 responses before they reach us,
         # so settle() sees them as a 5xx and refunds.
-        settle(request, rule, outcome.charge, response)
+        settle(request, applied, outcome.charge, response)
         if outcome.charge is not None:
             add_headers(
-                response, rule, outcome.charge.remaining, outcome.charge.reset_after
+                response, applied, outcome.charge.remaining, outcome.charge.reset_after
             )
         return response
 

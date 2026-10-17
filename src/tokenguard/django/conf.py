@@ -11,6 +11,7 @@ from django.core.exceptions import ImproperlyConfigured
 
 from tokenguard.algorithms import algorithm_names
 from tokenguard.redis_client import create_client
+from tokenguard.rulestore import RuleStore
 
 DEFAULTS: dict[str, Any] = {
     "REDIS_URL": "redis://localhost:6379/0",
@@ -22,6 +23,8 @@ DEFAULTS: dict[str, Any] = {
     "RULES": [],  # per-route overrides, first match wins
     "EXEMPT": [],  # regexes for paths that are never limited
     "TRUSTED_PROXIES": [],  # IPs/CIDRs allowed to set X-Forwarded-For
+    "LIVE_RULES": False,  # True: rules can be changed live in Redis (see RuleStore)
+    "LIVE_RULES_TTL": 5.0,  # seconds a process caches the live rules
     "ON_NEAR_LIMIT": None,  # callable(event) or dotted path, for budget alerts
 }
 
@@ -60,6 +63,20 @@ def _client(url: str, timeout: float):
 def get_client():
     """One pooled Redis client per (url, timeout), shared by every request."""
     return _client(get_setting("REDIS_URL"), float(get_setting("REDIS_TIMEOUT")))
+
+
+@functools.lru_cache(maxsize=8)
+def _rule_store(client, prefix: str, ttl: float) -> RuleStore:
+    return RuleStore(client, key_prefix=prefix, ttl=ttl)
+
+
+def get_rule_store() -> RuleStore:
+    """The live-rules store for the current settings (one per process)."""
+    return _rule_store(
+        get_client(),
+        f"{get_setting('KEY_PREFIX')}:",
+        float(get_setting("LIVE_RULES_TTL")),
+    )
 
 
 def _mask(url: str) -> str:
