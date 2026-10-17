@@ -31,20 +31,14 @@ average the same.
 
 ```python
 TOKENGUARD = {
-    "ALGORITHM": "token_bucket",  # the default for every rule
+    "ALGORITHM": "token_bucket",                 # the default for every rule
     "RULES": [
-        {
-            "name": "login",
-            "match": r"^/login/",
-            "capacity": 5,
-            "refill_rate": 0.1,
-            "algorithm": "sliding_window",
-        },  # this route only
+        {"name": "login", "match": r"^/login/", "capacity": 5, "refill_rate": 0.1,
+         "algorithm": "sliding_window"},         # this route only
     ],
 }
 
-
-@rate_limit(capacity=100, refill_rate=1, algorithm="fixed_window")  # this view only
+@rate_limit(capacity=100, refill_rate=1, algorithm="fixed_window")   # this view only
 def search(request): ...
 ```
 
@@ -139,9 +133,7 @@ Implement `check`, `peek` and `adjust`, and register a factory:
 ```python
 from tokenguard.algorithms import register_algorithm
 
-register_algorithm(
-    "my_algorithm", lambda client, clock=None, key_prefix="tb:": MyAlgorithm(...)
-)
+register_algorithm("my_algorithm", lambda client, clock=None, key_prefix="tb:": MyAlgorithm(...))
 ```
 
 Then it is picked up by the contract tests in `tests/test_algorithms.py` (add its

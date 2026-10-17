@@ -6,9 +6,9 @@ A **token-aware, Redis-backed rate limiter for Django**, built for LLM APIs.
 Limit clients by *how much they consume*, not just how often they call, with
 atomic correctness under concurrency.
 
-> **Status: work in progress (v0.3.0).** The core limiter, Redis/Lua backend, Django
-> integration and token-aware LLM limiting with budgets are done. More algorithms,
-> metrics and a dashboard are next (see [Roadmap](#roadmap)).
+> **Status: work in progress (v0.4.0).** The core limiter, Redis/Lua backend, Django
+> integration, token-aware LLM limiting with budgets, three algorithms and live rule
+> changes are done. Metrics and a dashboard are next (see [Roadmap](#roadmap)).
 
 ## Why
 
@@ -32,6 +32,9 @@ rate, so short bursts are fine while the long-run average stays capped.
 - **Per-model buckets and cost weights** (the large model can count 5x)
 - **Budgets**: burst, daily and monthly limits in tokens *and dollars*, checked in one
   atomic Lua call, with a near-limit alert hook
+- **Three algorithms behind one interface** (token bucket, fixed window, sliding
+  window), chosen globally, per route or per view
+- **Live rule changes**: change a limit while the server runs, with no redeploy
 
 ## Quick start (5 minutes)
 
@@ -53,13 +56,13 @@ pip install "tokenguard[django]"      # add [drf] for Django REST Framework
 MIDDLEWARE = [
     # ...
     "django.contrib.auth.middleware.AuthenticationMiddleware",
-    "tokenguard.django.middleware.TokenGuardMiddleware",  # after authentication
+    "tokenguard.django.middleware.TokenGuardMiddleware",   # after authentication
 ]
 
 TOKENGUARD = {
     "REDIS_URL": "redis://localhost:6379/0",
-    "DEFAULT_RULE": {"capacity": 60, "refill_rate": 1},  # burst of 60, then 1/sec
-    "FAIL_MODE": "open",  # or "closed"
+    "DEFAULT_RULE": {"capacity": 60, "refill_rate": 1},   # burst of 60, then 1/sec
+    "FAIL_MODE": "open",                                  # or "closed"
     "KEY_PREFIX": "tg",
 }
 ```
@@ -71,9 +74,9 @@ Every request is now limited per user (anonymous users per IP).
 ```python
 from tokenguard.django import rate_limit
 
-
 @rate_limit(capacity=20, refill_rate=0.5, key="user", cost=5)
-def generate_report(request): ...
+def generate_report(request):
+    ...
 ```
 
 **5. Try it**
@@ -102,17 +105,15 @@ from tokenguard.django import rate_limit
 from tokenguard.django.keys import api_key, combine
 from tokenguard.django.llm import llm_cost, llm_usage, model_key
 
-
 @rate_limit(
-    capacity=5_000,  # burst, in tokens
-    refill_rate=50,  # 50 tokens/second sustained
-    key=combine(api_key, model_key()),  # a bucket per (API key, model)
-    budget_key=api_key,  # one budget per API key
-    cost=llm_cost(prompt_field="messages"),  # input + expected output tokens
-    usage=llm_usage(),  # settle with the usage in the response
-    budget=Budget(
-        daily_tokens=50_000, daily_usd=0.25, monthly_tokens=1_000_000, monthly_usd=5.00
-    ),
+    capacity=5_000,                       # burst, in tokens
+    refill_rate=50,                       # 50 tokens/second sustained
+    key=combine(api_key, model_key()),    # a bucket per (API key, model)
+    budget_key=api_key,                   # one budget per API key
+    cost=llm_cost(prompt_field="messages"),   # input + expected output tokens
+    usage=llm_usage(),                    # settle with the usage in the response
+    budget=Budget(daily_tokens=50_000, daily_usd=0.25,
+                  monthly_tokens=1_000_000, monthly_usd=5.00),
 )
 def chat(request): ...
 ```
@@ -156,9 +157,8 @@ calls your hook once:
 ```python
 TOKENGUARD = {
     # ...
-    "ON_NEAR_LIMIT": "myapp.alerts.notify",  # or any callable(event: dict)
+    "ON_NEAR_LIMIT": "myapp.alerts.notify",   # or any callable(event: dict)
 }
-
 
 def notify(event):
     # {"scope": ..., "identity": ..., "layer": "daily", "metric": "tokens",
@@ -201,6 +201,56 @@ response has started. tokenguard can then only keep the up-front estimate, unles
 code calls `request.tokenguard.reconcile(usage)` when the stream ends. Settling
 automatically at the end of a stream is future work.
 
+## Algorithms: which one should I use?
+
+tokenguard has three algorithms behind one interface. Pick one globally with
+`TOKENGUARD["ALGORITHM"]`, per route with `"algorithm"` in a rule, or per view with
+`@rate_limit(..., algorithm="...")`.
+
+| | `token_bucket` (default) | `fixed_window` | `sliding_window` |
+|---|---|---|---|
+| Most in any window-length span | 2 x capacity | 2 x capacity (at the edge) | exactly capacity |
+| Memory per key | 120 bytes | 120 bytes | ~130 bytes per request in the window |
+| Time per check | O(1) | O(1) | O(requests in the window) |
+| Works with budgets | yes | no | no |
+
+- **Token bucket**: the default. Cheapest, bursts on purpose, and the only one that
+  works with budgets and settled LLM token costs.
+- **Fixed window**: simplest to explain, but a client can use two windows' worth
+  around an edge.
+- **Sliding window**: never more than the limit in any span. Use it for hard limits
+  with small numbers (tens of requests per key), since memory and time grow with the
+  requests in the window.
+
+Details, the boundary-burst demonstration and reproducible numbers:
+[docs/algorithms.md](docs/algorithms.md). Run `python scripts/compare_algorithms.py`
+to measure them on your own machine.
+
+## Live rule changes
+
+Change a limit while the server runs, with no redeploy. Rules live in Redis, every
+process caches them for a few seconds, and each change bumps a version number.
+
+```python
+TOKENGUARD = {"LIVE_RULES": True, "LIVE_RULES_TTL": 5}   # off by default
+```
+
+```bash
+python scripts/tokenguard_rules.py set login --capacity 20 --refill-rate 2
+python scripts/tokenguard_rules.py delete login          # back to the settings
+```
+
+- A change reaches every server within `LIVE_RULES_TTL` seconds, and requests never
+  wait on Redis for it (they read the cached copy).
+- You can change `capacity`, `refill_rate` and `algorithm` of the default rule, a
+  `RULES` entry, or a decorated view. Responses show the version in
+  `X-TokenGuard-Rules-Version`.
+- If Redis is down the last known rules keep being used. Bad values are rejected,
+  and an override that cannot apply is ignored.
+
+Details, what happens to existing counters, and a demo (`scripts/demo_live_rules.py`):
+[docs/live-rules.md](docs/live-rules.md).
+
 ## Configuration reference
 
 | Setting | Default | Meaning |
@@ -208,6 +258,9 @@ automatically at the end of a stream is future work.
 | `REDIS_URL` | `redis://localhost:6379/0` | Redis connection URL |
 | `DEFAULT_RULE` | `{"capacity": 60, "refill_rate": 1}` | Rule applied to every request by the middleware |
 | `FAIL_MODE` | `"open"` | What to do if Redis is down: `"open"` or `"closed"` |
+| `ALGORITHM` | `"token_bucket"` | `"token_bucket"`, `"fixed_window"` or `"sliding_window"`; a rule can override it |
+| `LIVE_RULES` | `False` | Allow rules to be changed live in Redis |
+| `LIVE_RULES_TTL` | `5` | Seconds a process caches the live rules (the propagation delay) |
 | `KEY_PREFIX` | `"tg"` | Prefix for all Redis keys |
 | `REDIS_TIMEOUT` | `0.25` | Seconds for Redis connect and each command |
 | `RULES` | `[]` | Per-route overrides (below); first match wins |
@@ -224,10 +277,10 @@ TOKENGUARD = {
     "EXEMPT": [r"^/health/", r"^/static/"],
     "RULES": [
         {
-            "name": "login",  # names the bucket; keep it stable
-            "match": r"^/login/",  # matched from the start of the path
+            "name": "login",              # names the bucket; keep it stable
+            "match": r"^/login/",         # matched from the start of the path
             "capacity": 5,
-            "refill_rate": 0.1,  # one new attempt every 10 seconds
+            "refill_rate": 0.1,           # one new attempt every 10 seconds
             "key": "ip",
             "fail_mode": "closed",
         },
@@ -260,7 +313,8 @@ path string. Combine built-ins with `tokenguard.django.keys.combine(...)`.
 |---|---|---|
 | `X-RateLimit-Limit` | all responses | Bucket capacity |
 | `X-RateLimit-Remaining` | all responses | Whole tokens left |
-| `X-RateLimit-Reset` | all responses | Unix time when the bucket is full again |
+| `X-RateLimit-Reset` | all responses | Unix time when the limit is full again (for a fixed window: when the window ends) |
+| `X-TokenGuard-Rules-Version` | when `LIVE_RULES` is on | Version of the live rules that served the request |
 | `Retry-After` | 429 only | Whole seconds to wait, rounded up (for a budget: until the next UTC midnight or month) |
 
 If Redis is down and the limiter fails open, no `X-RateLimit-*` headers are sent
@@ -311,11 +365,12 @@ and last-refill time), which makes it cheap to store in Redis.
 ## Architecture
 
 ```
-request -> Django middleware / @rate_limit -> key function -> RedisTokenBucket
-                                                                  |
-                                                     one Lua script, atomic
-                                                                  |
-                                                               Redis
+request -> Django middleware / @rate_limit -> live rule override (cached, optional)
+        -> key function -> algorithm: token bucket | fixed window | sliding window
+                                          |
+                             one Lua script per check, atomic
+                                          |
+                                        Redis
 ```
 
 - **In-memory `TokenBucket`**: single process, used for tests and as the reference
@@ -323,6 +378,11 @@ request -> Django middleware / @rate_limit -> key function -> RedisTokenBucket
 - **`RedisTokenBucket`**: shared by every process and server. One Redis hash per
   bucket (`tokens`, `ts`), with a TTL so idle buckets disappear.
 - Both implementations run the **same test suite**, so they are guaranteed to agree.
+- **Algorithms** (`tokenguard.algorithms`) share one interface, `check(key, cost, rule)`,
+  and one contract test suite that every algorithm must pass, including an exact-count
+  test under many threads and many processes.
+- **`RuleStore`** (`tokenguard.rulestore`) keeps live rule overrides in one Redis hash
+  with an atomic version counter, and caches them per process.
 
 ## Correctness under concurrency
 
@@ -361,6 +421,16 @@ atomically. See [docs/race-condition.md](docs/race-condition.md) for the reprodu
   hash tag and are checked and charged together, so a rejected request leaves no trace.
 - **The engine applies model weights**, so views and usage hooks only ever deal with
   raw tokens.
+- **A sliding-window log, not the cheaper counter.** The counter assumes traffic was
+  spread evenly through the last window, so a burst packed at a window's end can still
+  slip nearly double through. The log is exact, and costs memory and time proportional
+  to the requests in the window, which is why it is recommended for small limits only.
+- **One rule, two numbers.** Every algorithm takes `capacity` and `refill_rate`; window
+  algorithms read them as "capacity per capacity/refill_rate seconds", so switching
+  algorithm keeps the long-run average.
+- **Live rules are cached, not fetched per request.** A request never waits on Redis for
+  its rule: each process refreshes at most every `LIVE_RULES_TTL` seconds, keeps the last
+  known rules if Redis is down, and ignores damaged or inapplicable overrides.
 
 ## Running the demo and tests
 
@@ -374,12 +444,15 @@ python demo/manage.py runserver        # then try the curl above
 pytest                                 # unit, shared, concurrency and Django tests
 python scripts/latency.py              # per-call latency (localhost Redis)
 python scripts/demo_llm.py             # the LLM demo (server must be running)
+python scripts/compare_algorithms.py   # edge burst, memory and speed per algorithm
+python scripts/demo_live_rules.py      # change a limit live (needs LIVE_RULES on)
+python scripts/tokenguard_rules.py list    # inspect or change live rules
 ```
 
 Demo endpoints: `/api/ping/` (default rule), `/api/report/` (decorator, costs 5
 tokens), `/login/` (route rule, fail-closed), `/api/chat/` (DRF view),
-`/health/` (exempt), `/api/config/` (shows the active settings), and the mock LLM
-API: `/api/llm/chat/`, `/api/complete/`, `/api/complete-manual/`, `/api/budgeted/`.
+`/health/` (exempt), `/api/config/` (shows the active settings), `/api/fixed/` (a
+fixed-window view), `/api/summary/` (class-based view), and the mock LLM API: `/api/llm/chat/`, `/api/complete/`, `/api/complete-manual/`, `/api/budgeted/`.
 
 ## Limitations
 
@@ -396,6 +469,13 @@ API: `/api/llm/chat/`, `/api/complete/`, `/api/complete-manual/`, `/api/budgeted
 - Token counts are an estimate (about 4 characters per token) unless you plug in a real
   tokenizer, and prices in the model table are illustrative: use your provider's.
 - Budget periods are UTC days and months.
+- Budgets use the token bucket: they cannot be combined with `fixed_window` or
+  `sliding_window` on the same rule.
+- The sliding window stores one Redis entry per request in the window, so it suits
+  small limits (tens per key), not thousands.
+- Live rule changes: there is a delay of up to `LIVE_RULES_TTL` seconds, anyone who can
+  write to Redis can change limits (protect it; an authenticated rules API comes with
+  the dashboard), and the rules hash must not be evicted.
 
 ## Roadmap
 
@@ -403,33 +483,7 @@ API: `/api/llm/chat/`, `/api/complete/`, `/api/complete-manual/`, `/api/budgeted
 - [x] Week 2: Redis + atomic Lua, race condition proven and fixed
 - [x] Week 3: Django decorator, middleware, headers, fail modes
 - [x] Week 4: LLM token-aware charging, per-model buckets, budgets, mock LLM demo
-- [ ] Week 5: more algorithms and one original feature
+- [x] Week 5: three algorithms behind one interface, live rule changes
 - [ ] Week 6: metrics and React dashboard
 - [ ] Week 7: load tests and hardening
 - [ ] Week 8: PyPI release and write-up
-
-## Live rule changes
-
-Change a limit while the server runs, with no redeploy. Rules live in Redis, every
-process caches them for a few seconds, and each change bumps a version number.
-
-```python
-TOKENGUARD = {"LIVE_RULES": True, "LIVE_RULES_TTL": 5}  # off by default
-```
-
-```bash
-python scripts/tokenguard_rules.py set login --capacity 20 --refill-rate 2
-python scripts/tokenguard_rules.py delete login          # back to the settings
-```
-
-- A change reaches every server within `LIVE_RULES_TTL` seconds, and requests never
-  wait on Redis for it (they read the cached copy).
-- You can change `capacity`, `refill_rate` and `algorithm` of the default rule, a
-  `RULES` entry, or a decorated view. Responses show the version in
-  `X-TokenGuard-Rules-Version`.
-- If Redis is down the last known rules keep being used. Bad values are rejected,
-  and an override that cannot apply is ignored.
-
-Details, what happens to existing counters, and a demo (`scripts/demo_live_rules.py`):
-[docs/live-rules.md](docs/live-rules.md).
-

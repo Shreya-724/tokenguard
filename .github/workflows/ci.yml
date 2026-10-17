@@ -30,12 +30,13 @@ jobs:
       - run: pytest --cov=tokenguard --cov-report=term-missing
       - name: Django system check
         run: python demo/manage.py check
-      - name: End-to-end HTTP tests and the LLM demo (real server, real Redis)
+      - name: End-to-end HTTP tests and the demos (real server, real Redis)
         run: |
           python demo/manage.py runserver 8000 --noreload > server.log 2>&1 &
           for i in $(seq 1 30); do curl -sf http://localhost:8000/health/ && break; sleep 1; done
           python scripts/e2e_http.py http://localhost:8000
           python scripts/demo_llm.py http://localhost:8000
+          python scripts/demo_live_rules.py http://localhost:8000
       - name: Show server log on failure
         if: failure()
         run: cat server.log
