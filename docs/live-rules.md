@@ -6,9 +6,9 @@ Change a limit while the server runs: no redeploy, no restart.
 from tokenguard.rulestore import RuleStore
 
 store = RuleStore(redis_client, key_prefix="tg:")
-store.set_rule("login", capacity=20, refill_rate=2)    # bump a limit
+store.set_rule("login", capacity=20, refill_rate=2)  # bump a limit
 store.set_rule("default", algorithm="sliding_window")  # change an algorithm
-store.delete_rule("login")                             # back to the settings
+store.delete_rule("login")  # back to the settings
 ```
 
 or from a shell:
@@ -24,8 +24,8 @@ python scripts/tokenguard_rules.py delete login
 ```python
 TOKENGUARD = {
     # ...
-    "LIVE_RULES": True,        # off by default
-    "LIVE_RULES_TTL": 5,       # seconds a process caches the live rules
+    "LIVE_RULES": True,  # off by default
+    "LIVE_RULES_TTL": 5,  # seconds a process caches the live rules
 }
 ```
 

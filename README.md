@@ -56,13 +56,13 @@ pip install "tokenguard[django]"      # add [drf] for Django REST Framework
 MIDDLEWARE = [
     # ...
     "django.contrib.auth.middleware.AuthenticationMiddleware",
-    "tokenguard.django.middleware.TokenGuardMiddleware",   # after authentication
+    "tokenguard.django.middleware.TokenGuardMiddleware",  # after authentication
 ]
 
 TOKENGUARD = {
     "REDIS_URL": "redis://localhost:6379/0",
-    "DEFAULT_RULE": {"capacity": 60, "refill_rate": 1},   # burst of 60, then 1/sec
-    "FAIL_MODE": "open",                                  # or "closed"
+    "DEFAULT_RULE": {"capacity": 60, "refill_rate": 1},  # burst of 60, then 1/sec
+    "FAIL_MODE": "open",  # or "closed"
     "KEY_PREFIX": "tg",
 }
 ```
@@ -74,9 +74,9 @@ Every request is now limited per user (anonymous users per IP).
 ```python
 from tokenguard.django import rate_limit
 
+
 @rate_limit(capacity=20, refill_rate=0.5, key="user", cost=5)
-def generate_report(request):
-    ...
+def generate_report(request): ...
 ```
 
 **5. Try it**
@@ -105,15 +105,17 @@ from tokenguard.django import rate_limit
 from tokenguard.django.keys import api_key, combine
 from tokenguard.django.llm import llm_cost, llm_usage, model_key
 
+
 @rate_limit(
-    capacity=5_000,                       # burst, in tokens
-    refill_rate=50,                       # 50 tokens/second sustained
-    key=combine(api_key, model_key()),    # a bucket per (API key, model)
-    budget_key=api_key,                   # one budget per API key
-    cost=llm_cost(prompt_field="messages"),   # input + expected output tokens
-    usage=llm_usage(),                    # settle with the usage in the response
-    budget=Budget(daily_tokens=50_000, daily_usd=0.25,
-                  monthly_tokens=1_000_000, monthly_usd=5.00),
+    capacity=5_000,  # burst, in tokens
+    refill_rate=50,  # 50 tokens/second sustained
+    key=combine(api_key, model_key()),  # a bucket per (API key, model)
+    budget_key=api_key,  # one budget per API key
+    cost=llm_cost(prompt_field="messages"),  # input + expected output tokens
+    usage=llm_usage(),  # settle with the usage in the response
+    budget=Budget(
+        daily_tokens=50_000, daily_usd=0.25, monthly_tokens=1_000_000, monthly_usd=5.00
+    ),
 )
 def chat(request): ...
 ```
@@ -157,8 +159,9 @@ calls your hook once:
 ```python
 TOKENGUARD = {
     # ...
-    "ON_NEAR_LIMIT": "myapp.alerts.notify",   # or any callable(event: dict)
+    "ON_NEAR_LIMIT": "myapp.alerts.notify",  # or any callable(event: dict)
 }
+
 
 def notify(event):
     # {"scope": ..., "identity": ..., "layer": "daily", "metric": "tokens",
@@ -232,7 +235,7 @@ Change a limit while the server runs, with no redeploy. Rules live in Redis, eve
 process caches them for a few seconds, and each change bumps a version number.
 
 ```python
-TOKENGUARD = {"LIVE_RULES": True, "LIVE_RULES_TTL": 5}   # off by default
+TOKENGUARD = {"LIVE_RULES": True, "LIVE_RULES_TTL": 5}  # off by default
 ```
 
 ```bash
@@ -277,10 +280,10 @@ TOKENGUARD = {
     "EXEMPT": [r"^/health/", r"^/static/"],
     "RULES": [
         {
-            "name": "login",              # names the bucket; keep it stable
-            "match": r"^/login/",         # matched from the start of the path
+            "name": "login",  # names the bucket; keep it stable
+            "match": r"^/login/",  # matched from the start of the path
             "capacity": 5,
-            "refill_rate": 0.1,           # one new attempt every 10 seconds
+            "refill_rate": 0.1,  # one new attempt every 10 seconds
             "key": "ip",
             "fail_mode": "closed",
         },
