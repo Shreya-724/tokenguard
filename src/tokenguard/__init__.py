@@ -4,6 +4,7 @@ from tokenguard.algorithms import Limit, algorithm_names, get_algorithm
 from tokenguard.bucket import Decision, TokenBucket
 from tokenguard.clock import Clock, FakeClock, SystemClock, WallClock
 from tokenguard.errors import RedisUnavailableError
+from tokenguard.metrics import MetricsReader, MetricsRecorder
 from tokenguard.redis_bucket import NaiveRedisTokenBucket, RedisTokenBucket
 from tokenguard.rulestore import RuleStore
 
@@ -14,6 +15,8 @@ __all__ = [
     "Decision",
     "FakeClock",
     "Limit",
+    "MetricsReader",
+    "MetricsRecorder",
     "NaiveRedisTokenBucket",
     "RedisTokenBucket",
     "RedisUnavailableError",

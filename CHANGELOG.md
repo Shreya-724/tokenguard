@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+Metrics (Week 6, in progress).
+
+- `METRICS` setting: records every decision (allowed, blocked, tokens) in Redis,
+  per second, per rule and per consumer, in one Lua call, with automatic expiry
+  (`METRICS_RETENTION`, `METRICS_MAX_CONSUMERS`).
+- `tokenguard.metrics`: `MetricsRecorder` and `MetricsReader` (`summary`,
+  `timeseries`, `top_consumers`, `routes`, `bucket_level`).
+- Reconcile and refund correct the recorded token counts.
+- `scripts/tokenguard_stats.py` (stats, top, routes, series, bucket, watch) and
+  `scripts/demo_metrics.py`; docs/metrics.md.
+
 ## 0.4.0
 
 More algorithms, and live rule changes.

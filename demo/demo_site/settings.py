@@ -54,4 +54,5 @@ TOKENGUARD = {
     ],
     "LIVE_RULES": True,
     "LIVE_RULES_TTL": 2,
+    "METRICS": True,
 }

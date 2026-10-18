@@ -10,6 +10,12 @@ from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 
 from tokenguard.algorithms import algorithm_names
+from tokenguard.metrics import (
+    DEFAULT_MAX_CONSUMERS,
+    DEFAULT_RETENTION,
+    MetricsReader,
+    MetricsRecorder,
+)
 from tokenguard.redis_client import create_client
 from tokenguard.rulestore import RuleStore
 
@@ -25,6 +31,9 @@ DEFAULTS: dict[str, Any] = {
     "TRUSTED_PROXIES": [],  # IPs/CIDRs allowed to set X-Forwarded-For
     "LIVE_RULES": False,  # True: rules can be changed live in Redis (see RuleStore)
     "LIVE_RULES_TTL": 5.0,  # seconds a process caches the live rules
+    "METRICS": False,  # True: record every decision (see tokenguard.metrics)
+    "METRICS_RETENTION": DEFAULT_RETENTION,  # seconds of history kept
+    "METRICS_MAX_CONSUMERS": DEFAULT_MAX_CONSUMERS,  # per minute, per ranking
     "ON_NEAR_LIMIT": None,  # callable(event) or dotted path, for budget alerts
 }
 
@@ -76,6 +85,34 @@ def get_rule_store() -> RuleStore:
         get_client(),
         f"{get_setting('KEY_PREFIX')}:",
         float(get_setting("LIVE_RULES_TTL")),
+    )
+
+
+@functools.lru_cache(maxsize=8)
+def _recorder(client, prefix: str, retention: int, max_consumers: int):
+    return MetricsRecorder(
+        client, key_prefix=prefix, retention=retention, max_consumers=max_consumers
+    )
+
+
+def get_metrics_recorder() -> MetricsRecorder | None:
+    """The recorder for the current settings, or None when METRICS is off."""
+    if not get_setting("METRICS"):
+        return None
+    return _recorder(
+        get_client(),
+        f"{get_setting('KEY_PREFIX')}:",
+        int(get_setting("METRICS_RETENTION")),
+        int(get_setting("METRICS_MAX_CONSUMERS")),
+    )
+
+
+def get_metrics_reader() -> MetricsReader:
+    """A reader for the current settings (works whether or not METRICS is on)."""
+    return MetricsReader(
+        get_client(),
+        key_prefix=f"{get_setting('KEY_PREFIX')}:",
+        retention=int(get_setting("METRICS_RETENTION")),
     )
 
 

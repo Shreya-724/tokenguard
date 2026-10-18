@@ -29,6 +29,7 @@ from tokenguard.django.conf import (
     check_algorithm,
     check_fail_mode,
     get_client,
+    get_metrics_recorder,
     get_rule_store,
     get_setting,
 )
@@ -110,6 +111,7 @@ class Charge:
         identity: str,
         decision: BudgetDecision | None = None,
         reset_after: float | None = None,
+        consumer: str = "",
     ):
         self._bucket = bucket
         self.cost = cost
@@ -118,7 +120,8 @@ class Charge:
         self.settled = False
         self._finalized = False
         self._rule = rule
-        self._identity = identity
+        self._identity = identity  # the budget owner ("" when there is no budget)
+        self.consumer = consumer  # who the request belongs to, for metrics
         self._periods = decision.periods if decision else None
         self.spend = decision.spend if decision else None
         self._spend_before = (
@@ -149,7 +152,19 @@ class Charge:
         except RedisUnavailableError as exc:
             # The work is already done; never fail the response over bookkeeping.
             logger.warning("Redis unavailable, could not reconcile usage: %s", exc)
+        self._record_correction(tokens - self.cost.tokens)
         return self.remaining
+
+    def _record_correction(self, delta: float) -> None:
+        """Metrics: the real tokens differ from the estimate charged up front."""
+        if not delta:
+            return
+        try:
+            recorder = get_metrics_recorder()
+            if recorder is not None:
+                recorder.record_adjust(self._rule.scope, self.consumer, delta)
+        except Exception:
+            logger.exception("tokenguard: could not record metrics")
 
     def refund(self) -> float:
         """The request failed: give back everything it was charged."""
@@ -172,6 +187,16 @@ class Outcome:
     rejection: HttpResponse | None = None  # a ready 413/429/503, or None to proceed
     charge: Charge | None = None  # None if rejected, or Redis was down (fail-open)
     rule: Rule | None = None  # the rule actually applied (live changes included)
+
+
+def _record(rule: Rule, identity: str, allowed: bool, cost: Cost) -> None:
+    """Count this decision in the metrics (a no-op unless METRICS is on)."""
+    try:
+        recorder = get_metrics_recorder()
+        if recorder is not None:
+            recorder.record(rule.scope, identity, allowed=allowed, tokens=cost.tokens)
+    except Exception:  # metrics must never take a request down
+        logger.exception("tokenguard: could not record metrics")
 
 
 def _num(value: float) -> float | int:
@@ -324,11 +349,12 @@ def _enforce(request: Any, rule: Rule) -> Outcome:
     check_fail_mode(fail_mode)
 
     cost = rule.cost_for(request)
+    identity = rule.key(request)
     if _never_fits(rule, cost):
         # Decided locally: it can never fit, so it is rejected even if Redis is down.
+        _record(rule, identity, False, cost)
         return Outcome(rejection=request_too_large(rule, cost))
 
-    identity = rule.key(request)
     prefix = f"{get_setting('KEY_PREFIX')}:"
     budget_identity = ""
     if rule.budget is None:
@@ -364,6 +390,7 @@ def _enforce(request: Any, rule: Rule) -> Outcome:
         logger.error("Redis unavailable, failing CLOSED (%s): %s", rule.scope, exc)
         return Outcome(rejection=unavailable_response())
 
+    _record(rule, identity, decision.allowed, cost)
     if not decision.allowed:
         return Outcome(rejection=too_many_requests(rule, decision))
 
@@ -375,6 +402,7 @@ def _enforce(request: Any, rule: Rule) -> Outcome:
         budget_identity,
         decision if rule.budget is not None else None,
         getattr(decision, "reset_after", None),
+        identity,
     )
     request.tokenguard = charge
     return Outcome(charge=charge)
