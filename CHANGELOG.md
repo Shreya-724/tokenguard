@@ -10,6 +10,14 @@ Metrics (Week 6, in progress).
 - `tokenguard.metrics`: `MetricsRecorder` and `MetricsReader` (`summary`,
   `timeseries`, `top_consumers`, `routes`, `bucket_level`).
 - Reconcile and refund correct the recorded token counts.
+- Staff-only REST API (Django REST Framework): `stats/`, `consumers/`,
+  `buckets/<key>/`, `rules/` (list, change live, reset), JSON errors, exempt from
+  rate limiting. Included with `tokenguard.django.api_urls`.
+- WebSocket live feed (Django Channels): `ws/tokenguard/stats/`, staff-only,
+  fed once a second by `manage.py tokenguard_feed` through the channel layer.
+- `tokenguard.dashboard.snapshot`, `tokenguard.django.admin_api` (the framework-free
+  logic behind the API), rule catalog, `scripts/ws_client.py`,
+  docs/dashboard-backend.md. `dashboard` install extra.
 - `scripts/tokenguard_stats.py` (stats, top, routes, series, bucket, watch) and
   `scripts/demo_metrics.py`; docs/metrics.md.
 

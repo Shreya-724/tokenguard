@@ -6,11 +6,16 @@ SECRET_KEY = "demo-only-not-a-secret"
 DEBUG = True
 ALLOWED_HOSTS: list[str] = []
 
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+
 INSTALLED_APPS = [
+    "daphne",  # first: makes runserver speak ASGI
+    "channels",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "rest_framework",
+    "tokenguard.django",  # adds `manage.py tokenguard_feed`
 ]
 
 MIDDLEWARE = [
@@ -21,6 +26,13 @@ MIDDLEWARE = [
 ]
 
 ROOT_URLCONF = "demo_site.urls"
+ASGI_APPLICATION = "demo_site.asgi.application"
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {"hosts": [REDIS_URL]},
+    }
+}
 DATABASES = {
     "default": {"ENGINE": "django.db.backends.sqlite3", "NAME": BASE_DIR / "db.sqlite3"}
 }
@@ -28,13 +40,16 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 USE_TZ = True
 
 TOKENGUARD = {
-    "REDIS_URL": os.getenv("REDIS_URL", "redis://localhost:6379/0"),
+    "REDIS_URL": REDIS_URL,
     "DEFAULT_RULE": {"capacity": 60, "refill_rate": 1},  # 60 burst, 1/sec sustained
     "FAIL_MODE": "open",  # if Redis dies, let traffic through (and log a warning)
     "KEY_PREFIX": "tg",
     "REDIS_TIMEOUT": 0.25,
     "TRUSTED_PROXIES": [],  # e.g. ["10.0.0.0/8"] when behind a load balancer
     "EXEMPT": [r"^/health/", r"^/static/", r"^/admin/"],
+    "LIVE_RULES": True,
+    "LIVE_RULES_TTL": 2,
+    "METRICS": True,
     "RULES": [
         {
             "name": "login",
@@ -52,7 +67,4 @@ TOKENGUARD = {
             "key": "user",
         },
     ],
-    "LIVE_RULES": True,
-    "LIVE_RULES_TTL": 2,
-    "METRICS": True,
 }

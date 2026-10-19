@@ -1,10 +1,11 @@
-from django.urls import path
+from django.urls import include, path
 
 from tokenguard.django import rate_limit
 
 from . import views
 
 urlpatterns = [
+    path("tokenguard/", include("tokenguard.django.api_urls")),
     path("health/", views.health),
     path("api/ping/", views.ping),
     path("api/report/", views.report),

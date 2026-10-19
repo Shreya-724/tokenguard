@@ -332,6 +332,9 @@ def _effective_rule(rule: Rule) -> Rule:
         return dataclasses.replace(rule, rules_version=changes.get("rules_version"))
 
 
+effective_rule = _effective_rule  # public name, for the admin API
+
+
 def enforce(request: Any, rule: Rule) -> Outcome:
     """Charge the request against its bucket (before the view runs).
 

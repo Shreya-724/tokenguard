@@ -324,19 +324,31 @@ class MetricsReader:
         """
         if by not in ("tokens", "blocked"):
             raise ValueError('by must be "tokens" or "blocked"')
+        return self._ranked(self._consumer_totals(minutes), n, by)
+
+    def rankings(
+        self, n: int = 10, minutes: int = 5
+    ) -> tuple[list[Consumer], list[Consumer]]:
+        """(top by tokens, top by blocked) from one Redis round trip."""
+        totals = self._consumer_totals(minutes)
+        return self._ranked(totals, n, "tokens"), self._ranked(totals, n, "blocked")
+
+    def _consumer_totals(self, minutes: int) -> dict[str, list[float]]:
         minutes = self._check_window(minutes, "minutes", self._retention // 60 + 1)
         now = int(self._clock.now())
-        buckets = range(now // 60 - minutes + 1, now // 60 + 1)
         pipe = self._r.pipeline(transaction=False)
-        for m in buckets:
+        for m in range(now // 60 - minutes + 1, now // 60 + 1):
             pipe.zrange(f"{self._prefix}metrics:top:{m}", 0, -1, withscores=True)
             pipe.zrange(f"{self._prefix}metrics:blk:{m}", 0, -1, withscores=True)
-        results = pipe.execute()
         totals: dict[str, list[float]] = {}
-        for i, rows in enumerate(results):
+        for i, rows in enumerate(pipe.execute()):
             slot = i % 2  # 0 = tokens, 1 = blocked
             for member, score in rows:
                 totals.setdefault(member, [0.0, 0.0])[slot] += float(score)
+        return totals
+
+    @staticmethod
+    def _ranked(totals: dict[str, list[float]], n: int, by: str) -> list[Consumer]:
         order = 0 if by == "tokens" else 1
         ranked = sorted(totals.items(), key=lambda kv: kv[1][order], reverse=True)
         out = []

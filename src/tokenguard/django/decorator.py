@@ -8,6 +8,7 @@ from collections.abc import Callable
 from typing import Any
 
 from tokenguard.budget import Budget, Cost
+from tokenguard.django.catalog import register_rule
 from tokenguard.django.engine import (
     CostFunc,
     Rule,
@@ -105,6 +106,7 @@ def rate_limit(
                 )
             return response
 
+        register_rule(rule)  # so the admin API can list and change it
         # The middleware looks for this marker so it does not charge a second time.
         wrapper.tokenguard_rule = rule  # type: ignore[attr-defined]
         return wrapper

@@ -13,6 +13,13 @@ dependencies = ["redis>=5.0"]
 [project.optional-dependencies]
 django = ["django>=4.2"]
 drf = ["django>=4.2", "djangorestframework>=3.14"]
+dashboard = [
+    "django>=4.2",
+    "djangorestframework>=3.14",
+    "channels>=4.0",
+    "channels-redis>=4.1",
+    "daphne>=4.0",
+]
 dev = [
     "pytest",
     "pytest-cov",
@@ -20,6 +27,11 @@ dev = [
     "ruff",
     "django>=4.2",
     "djangorestframework>=3.14",
+    "channels>=4.0",
+    "channels-redis>=4.1",
+    "daphne>=4.0",
+    "pytest-asyncio",
+    "websockets",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -28,6 +40,7 @@ packages = ["src/tokenguard"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+asyncio_default_fixture_loop_scope = "function"
 pythonpath = ["demo"]
 DJANGO_SETTINGS_MODULE = "demo_site.settings"
 

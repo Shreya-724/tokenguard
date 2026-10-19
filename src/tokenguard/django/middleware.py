@@ -86,6 +86,11 @@ class TokenGuardMiddleware:
             view = None
         if view is not None and hasattr(view, "tokenguard_rule"):
             return None  # the decorator handles (and charges) this view
+        view_class = getattr(view, "view_class", None)  # class-based views
+        if getattr(view, "tokenguard_exempt", False) or getattr(
+            view_class, "tokenguard_exempt", False
+        ):
+            return None  # e.g. tokenguard's own admin API
 
         for spec in get_setting("RULES"):
             if _compile(spec["match"]).match(path):
