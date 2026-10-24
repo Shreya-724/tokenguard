@@ -90,14 +90,16 @@ snapshot, but does not update.
 own tight rule in `TOKENGUARD["RULES"]`:
 
 ```python
-{
-    "name": "dashboard-login",
-    "match": r"^/tokenguard/login/",
-    "capacity": 5,
-    "refill_rate": 0.1,      # one new attempt every 10 seconds
-    "key": "ip",
-    "fail_mode": "closed",   # never let guessing through if Redis is down
-},
+(
+    {
+        "name": "dashboard-login",
+        "match": r"^/tokenguard/login/",
+        "capacity": 5,
+        "refill_rate": 0.1,  # one new attempt every 10 seconds
+        "key": "ip",
+        "fail_mode": "closed",  # never let guessing through if Redis is down
+    },
+)
 ```
 
 (`session/` and `logout/` are exempt; the dashboard calls `session/` on every

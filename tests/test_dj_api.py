@@ -219,9 +219,7 @@ def test_login_and_logout_are_protected_against_csrf(on, people, settings):
     assert client.post("/tokenguard/login/", body, format="json").status_code == 403
     client.get("/tokenguard/session/")  # hands out the CSRF cookie
     token = client.cookies["csrftoken"].value
-    ok = client.post(
-        "/tokenguard/login/", body, format="json", HTTP_X_CSRFTOKEN=token
-    )
+    ok = client.post("/tokenguard/login/", body, format="json", HTTP_X_CSRFTOKEN=token)
     assert ok.status_code == 200
 
 
