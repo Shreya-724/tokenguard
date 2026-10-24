@@ -30,6 +30,12 @@ def report(request):
     return JsonResponse({"report": "generated"})
 
 
+@rate_limit(capacity=30, refill_rate=2, key="api_key")
+def keyed(request):
+    """One bucket per X-API-Key: what scripts/load_demo.py and the dashboard use."""
+    return JsonResponse({"ok": True})
+
+
 @rate_limit(capacity=5, refill_rate=0.001, key="ip", algorithm="fixed_window")
 def fixed(request):
     """A fixed window: 5 requests per window (5 / 0.001 = 5,000 seconds)."""

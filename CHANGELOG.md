@@ -18,6 +18,13 @@ Metrics (Week 6, in progress).
 - `tokenguard.dashboard.snapshot`, `tokenguard.django.admin_api` (the framework-free
   logic behind the API), rule catalog, `scripts/ws_client.py`,
   docs/dashboard-backend.md. `dashboard` install extra.
+- React dashboard (`dashboard/`, Vite + Recharts): live traffic chart over the
+  WebSocket, connection state machine (connected / reconnecting / disconnected,
+  0.5 s to 10 s exponential backoff, dead-socket and sign-out detection), top
+  consumers, most blocked, per-rule traffic, per-key bucket gauge, and a rule
+  editor that changes limits live with chart markers and a before/after readout.
+  Staff sign-in endpoints (`session/`, `login/`, `logout/`). `scripts/load_demo.py`
+  generates traffic; docs/dashboard.md.
 - `scripts/tokenguard_stats.py` (stats, top, routes, series, bucket, watch) and
   `scripts/demo_metrics.py`; docs/metrics.md.
 

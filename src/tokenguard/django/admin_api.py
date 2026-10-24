@@ -103,7 +103,12 @@ def list_rules() -> dict[str, Any]:
         ]
     except REDIS_DOWN:
         raise redis_unavailable() from None
-    return {"live_rules_enabled": live, "version": rules.version, "rules": items}
+    return {
+        "live_rules_enabled": live,
+        "version": rules.version,
+        "ttl": float(get_setting("LIVE_RULES_TTL")),  # seconds until servers notice
+        "rules": items,
+    }
 
 
 def _find(scope: str) -> tuple[str, Rule]:

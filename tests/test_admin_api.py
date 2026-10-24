@@ -89,6 +89,7 @@ def test_list_rules_shows_configured_and_effective(on):
     listing = admin_api.list_rules()
     rules = by_scope(listing)
     assert listing["live_rules_enabled"] is True
+    assert listing["ttl"] == 60  # how long servers may take to notice a change
     assert rules["default"]["configured"] == {
         "capacity": 3,
         "refill_rate": 0.001,

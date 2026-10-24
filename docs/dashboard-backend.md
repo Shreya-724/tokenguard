@@ -82,4 +82,36 @@ snapshot, but does not update.
 
 - Bucket levels for rules with a budget are not available yet (422).
 - Top consumers and routes are per whole minute (see docs/metrics.md).
-- No login page is included; use the Django admin login or `ws_client.py --login`.
+- Sign-in: the React dashboard has its own form, backed by `GET session/`, `POST login/` and `POST logout/` (staff accounts only, CSRF-protected). Add a tight rate limit for `login/` (below). `ws_client.py --login` still works for terminals.
+
+## Limiting password guessing on the dashboard login
+
+`POST /tokenguard/login/` is rate limited like any other route, so give it its
+own tight rule in `TOKENGUARD["RULES"]`:
+
+```python
+{
+    "name": "dashboard-login",
+    "match": r"^/tokenguard/login/",
+    "capacity": 5,
+    "refill_rate": 0.1,      # one new attempt every 10 seconds
+    "key": "ip",
+    "fail_mode": "closed",   # never let guessing through if Redis is down
+},
+```
+
+(`session/` and `logout/` are exempt; the dashboard calls `session/` on every
+page load.) The failure message is the same for a wrong password, an unknown
+user and a non-staff account, so it does not reveal which accounts exist.
+
+## CSRF and the dev server
+
+The dashboard's dev server (`http://localhost:5173`) is a different origin from
+Django. Django's CSRF check refuses a sign-in or rule change whose `Origin` it does
+not trust ("Origin checking failed"), so add the dev origins to `settings.py`:
+
+```python
+CSRF_TRUSTED_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"]
+```
+
+For a deployed dashboard, list its real `https://` origin instead.

@@ -5,12 +5,14 @@ from tokenguard.django import rate_limit
 from . import views
 
 urlpatterns = [
+    # Week 6: staff-only stats, consumers, buckets and rules for the dashboard
     path("tokenguard/", include("tokenguard.django.api_urls")),
     path("health/", views.health),
     path("api/ping/", views.ping),
     path("api/report/", views.report),
     path("api/config/", views.config),
     path("api/fixed/", views.fixed),
+    path("api/keyed/", views.keyed),
     path("login/", views.login),
     path(
         "api/chat/",

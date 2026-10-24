@@ -144,3 +144,100 @@ def test_wrong_methods_are_405(staff):
 def test_the_endpoints_are_exempt_from_rate_limiting(staff):
     codes = {staff.get("/tokenguard/stats/").status_code for _ in range(5)}
     assert codes == {200}  # DEFAULT_RULE allows one request in total
+
+
+# ---- signing in (the dashboard's login) ----
+@pytest.fixture
+def people(db):
+    User.objects.create_user("boss", "boss@example.com", "correct-horse", is_staff=True)
+    User.objects.create_user("intern", "i@example.com", "hunter2", is_staff=False)
+
+
+def test_session_reports_anonymous_and_sets_the_csrf_cookie(on):
+    client = APIClient()
+    data = client.get("/tokenguard/session/").json()
+    assert data == {"authenticated": False, "staff": False, "username": None}
+    assert "csrftoken" in client.cookies
+
+
+@pytest.mark.django_db
+def test_a_staff_user_can_sign_in_and_use_the_api(on, people):
+    client = APIClient()
+    assert client.get("/tokenguard/stats/").status_code in (401, 403)
+    r = client.post(
+        "/tokenguard/login/",
+        {"username": "boss", "password": "correct-horse"},
+        format="json",
+    )
+    assert r.status_code == 200 and r.json()["staff"] is True
+    assert client.get("/tokenguard/stats/").status_code == 200  # the session works
+    assert client.get("/tokenguard/session/").json()["username"] == "boss"
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "username,password",
+    [("boss", "wrong"), ("nobody", "x"), ("intern", "hunter2")],  # not staff
+)
+def test_bad_credentials_and_non_staff_get_the_same_401(on, people, username, password):
+    r = APIClient().post(
+        "/tokenguard/login/",
+        {"username": username, "password": password},
+        format="json",
+    )
+    assert r.status_code == 401
+    assert r.json() == {"error": "invalid credentials, or not a staff account"}
+
+
+def test_login_needs_both_fields(on):
+    r = APIClient().post("/tokenguard/login/", {"username": "boss"}, format="json")
+    assert r.status_code == 400
+
+
+@pytest.mark.django_db
+def test_logout_ends_the_session(on, people):
+    client = APIClient()
+    client.post(
+        "/tokenguard/login/",
+        {"username": "boss", "password": "correct-horse"},
+        format="json",
+    )
+    assert client.post("/tokenguard/logout/", {}, format="json").status_code == 200
+    assert client.get("/tokenguard/stats/").status_code in (401, 403)
+
+
+@pytest.mark.django_db
+def test_login_and_logout_are_protected_against_csrf(on, people, settings):
+    # `on` allows ONE request in total (to prove the API is exempt). Login is not
+    # exempt, so give this test enough room for its three login attempts.
+    settings.TOKENGUARD = {
+        **settings.TOKENGUARD,
+        "DEFAULT_RULE": {"capacity": 50, "refill_rate": 1},
+    }
+    client = APIClient(enforce_csrf_checks=True)
+    body = {"username": "boss", "password": "correct-horse"}
+    assert client.post("/tokenguard/login/", body, format="json").status_code == 403
+    client.get("/tokenguard/session/")  # hands out the CSRF cookie
+    token = client.cookies["csrftoken"].value
+    ok = client.post(
+        "/tokenguard/login/", body, format="json", HTTP_X_CSRFTOKEN=token
+    )
+    assert ok.status_code == 200
+
+
+@pytest.mark.django_db
+def test_changing_a_rule_over_a_session_needs_the_csrf_token(on, people):
+    client = APIClient(enforce_csrf_checks=True)
+    client.get("/tokenguard/session/")
+    token = client.cookies["csrftoken"].value
+    client.post(
+        "/tokenguard/login/",
+        {"username": "boss", "password": "correct-horse"},
+        format="json",
+        HTTP_X_CSRFTOKEN=token,
+    )
+    token = client.cookies["csrftoken"].value  # may have been rotated
+    url = "/tokenguard/rules/default/"
+    assert client.put(url, {"capacity": 9}, format="json").status_code == 403
+    ok = client.put(url, {"capacity": 9}, format="json", HTTP_X_CSRFTOKEN=token)
+    assert ok.status_code == 200

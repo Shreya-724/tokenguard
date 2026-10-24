@@ -36,9 +36,19 @@ def make_session(username: str) -> str:
     )
     from django.contrib.sessions.backends.db import SessionStore
 
-    user = get_user_model().objects.get(username=username)
+    users = get_user_model().objects
+    user = users.filter(username=username).first()
+    if user is None:
+        staff = list(users.filter(is_staff=True).values_list("username", flat=True))
+        hint = (
+            f"staff users here: {', '.join(staff)}"
+            if staff
+            else "there are no staff users yet; create one with:\n"
+            f"    python demo/manage.py createsuperuser --username {username}"
+        )
+        sys.exit(f"no user named {username!r} in the demo database ({hint})")
     if not user.is_staff:
-        sys.exit(f"{username} is not a staff user")
+        sys.exit(f"{username!r} is not a staff user (is_staff must be true)")
     store = SessionStore()
     store[SESSION_KEY] = str(user.pk)
     store[BACKEND_SESSION_KEY] = "django.contrib.auth.backends.ModelBackend"

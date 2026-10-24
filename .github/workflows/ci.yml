@@ -40,3 +40,18 @@ jobs:
       - name: Show server log on failure
         if: failure()
         run: cat server.log
+
+  dashboard:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # After you commit dashboard/package-lock.json, switch this to `npm ci`.
+      - run: npm install --no-audit --no-fund
+      - run: npm test
+      - run: npm run build
