@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tokenguard"
-version = "0.4.0"
+version = "0.5.0"
 description = "A token-aware, Redis-backed rate limiter for Django, built for LLM APIs"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -20,6 +20,7 @@ dashboard = [
     "channels-redis>=4.1",
     "daphne>=4.0",
 ]
+bench = ["locust>=2.20", "daphne>=4.0", "djangorestframework>=3.14", "django>=4.2"]
 dev = [
     "pytest",
     "pytest-cov",

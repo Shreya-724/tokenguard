@@ -2,7 +2,16 @@
 
 ## Unreleased
 
-Metrics (Week 6, in progress).
+### Added
+
+- `benchmarks/`: a repeatable Locust load test (allowed, blocked and distinct-caller
+  scenarios) that runs the same views with and without the limiter, a reporter
+  that turns the raw CSVs into a table, and a limiter-only latency benchmark.
+- `demo_site.bench_settings` and the `/bench/` views used by the load test.
+
+## 0.5.0
+
+Metrics, a staff-only API and a live React dashboard.
 
 - `METRICS` setting: records every decision (allowed, blocked, tokens) in Redis,
   per second, per rule and per consumer, in one Lua call, with automatic expiry
@@ -25,6 +34,9 @@ Metrics (Week 6, in progress).
   editor that changes limits live with chart markers and a before/after readout.
   Staff sign-in endpoints (`session/`, `login/`, `logout/`). `scripts/load_demo.py`
   generates traffic; docs/dashboard.md.
+- `docs/demo-script.md`: a 60-second demo script and recording steps;
+  `scripts/demo_check.py` checks everything is up; `scripts/load_demo.py`
+  `--phase-seconds` sets how long each quiet/hammer phase lasts.
 - `scripts/tokenguard_stats.py` (stats, top, routes, series, bucket, watch) and
   `scripts/demo_metrics.py`; docs/metrics.md.
 

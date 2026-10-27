@@ -8,7 +8,7 @@ from tokenguard.metrics import MetricsReader, MetricsRecorder
 from tokenguard.redis_bucket import NaiveRedisTokenBucket, RedisTokenBucket
 from tokenguard.rulestore import RuleStore
 
-__version__ = "0.4.0"  # keep equal to pyproject.toml (tests/test_version.py checks)
+__version__ = "0.5.0"  # keep equal to pyproject.toml (tests/test_version.py checks)
 
 __all__ = [
     "Clock",

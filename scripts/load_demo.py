@@ -2,6 +2,7 @@
 
     python scripts/load_demo.py                      # 90 seconds, against :8000
     python scripts/load_demo.py --seconds 300 --base http://localhost:8000
+    python scripts/load_demo.py --seconds 60 --phase-seconds 20   # the 60-second demo
 
 Four simulated API keys call /api/keyed/ (30 burst, 2 per second each):
 alice and bob stay under the limit, carol is busy, and mallory is quiet for a
@@ -24,7 +25,7 @@ CLIENTS = {
     "carol": (2.5, 2.5, 2.5),
     "mallory": (0.5, 25.0, 0.5),
 }
-PHASE_SECONDS = 30
+PHASE_SECONDS = 30  # --phase-seconds changes it
 counts = {"ok": 0, "blocked": 0, "error": 0}
 lock = threading.Lock()
 
@@ -42,10 +43,12 @@ def call(base: str, key: str) -> None:
         counts[outcome] += 1
 
 
-def client(base: str, name: str, started: float, until: float) -> None:
+def client(
+    base: str, name: str, started: float, until: float, phase_seconds: float
+) -> None:
     rates = CLIENTS[name]
     while time.time() < until:
-        phase = int((time.time() - started) // PHASE_SECONDS) % len(rates)
+        phase = int((time.time() - started) // phase_seconds) % len(rates)
         call(base, name)
         time.sleep(random.expovariate(rates[phase]))  # random gaps, like real users
 
@@ -54,12 +57,22 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--base", default="http://localhost:8000")
     parser.add_argument("--seconds", type=int, default=90)
+    parser.add_argument(
+        "--phase-seconds",
+        type=float,
+        default=PHASE_SECONDS,
+        help="length of each phase: quiet, then mallory hammers, then quiet",
+    )
     args = parser.parse_args()
+    if args.phase_seconds <= 0:
+        parser.error("--phase-seconds must be above 0")
     started = time.time()
     until = started + args.seconds
     threads = [
         threading.Thread(
-            target=client, args=(args.base, n, started, until), daemon=True
+            target=client,
+            args=(args.base, n, started, until, args.phase_seconds),
+            daemon=True,
         )
         for n in CLIENTS
     ]
@@ -67,7 +80,7 @@ def main() -> None:
         t.start()
     try:
         while time.time() < until:
-            time.sleep(5)
+            time.sleep(max(0.0, min(5.0, until - time.time())))
             with lock:
                 print(
                     f"{int(time.time() - started):>4}s  ok={counts['ok']} "

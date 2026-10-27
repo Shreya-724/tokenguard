@@ -7,6 +7,8 @@ from . import views
 urlpatterns = [
     # Week 6: staff-only stats, consumers, buckets and rules for the dashboard
     path("tokenguard/", include("tokenguard.django.api_urls")),
+    # Week 7: endpoints for load tests (benchmarks/)
+    path("bench/", include("demo_site.bench_urls")),
     path("health/", views.health),
     path("api/ping/", views.ping),
     path("api/report/", views.report),

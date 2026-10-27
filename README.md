@@ -6,9 +6,15 @@ A **token-aware, Redis-backed rate limiter for Django**, built for LLM APIs.
 Limit clients by *how much they consume*, not just how often they call, with
 atomic correctness under concurrency.
 
-> **Status: work in progress (v0.4.0).** The core limiter, Redis/Lua backend, Django
-> integration, token-aware LLM limiting with budgets, three algorithms and live rule
-> changes are done. Metrics and a dashboard are next (see [Roadmap](#roadmap)).
+> **Status: work in progress (v0.5.0).** The core limiter, Redis/Lua backend, Django
+> integration, token-aware LLM limiting with budgets, three algorithms, live rule
+> changes, metrics and a live React dashboard are done. Load tests and hardening are
+> next (see [Roadmap](#roadmap)).
+
+<!-- After recording (see docs/demo-script.md), save the GIF as docs/demo.gif and
+     remove the comment markers around the image line to show it:
+![The dashboard: traffic, a client hits its limit, the rule is edited live](docs/demo.gif)
+-->
 
 ## Why
 
@@ -35,6 +41,10 @@ rate, so short bursts are fine while the long-run average stays capped.
 - **Three algorithms behind one interface** (token bucket, fixed window, sliding
   window), chosen globally, per route or per view
 - **Live rule changes**: change a limit while the server runs, with no redeploy
+- **Metrics**: every decision recorded in Redis (one Lua call), queryable for
+  requests/sec, blocked ratio, top consumers and a key's bucket level
+- **Live dashboard** (React + Recharts over a WebSocket): traffic chart, top consumers,
+  bucket gauge, and a rule editor that shows the before/after of a change
 
 ## Quick start (5 minutes)
 
@@ -254,6 +264,32 @@ python scripts/tokenguard_rules.py delete login          # back to the settings
 Details, what happens to existing counters, and a demo (`scripts/demo_live_rules.py`):
 [docs/live-rules.md](docs/live-rules.md).
 
+## Metrics
+
+Turn on `"METRICS": True` and tokenguard records every decision in Redis (one
+Lua call each): allowed and blocked per second, per rule, and per consumer, with
+automatic expiry. Then ask it questions:
+
+```python
+from tokenguard.django.conf import get_metrics_reader
+
+m = get_metrics_reader()
+m.summary(60)  # requests, blocked ratio, requests/sec
+m.top_consumers(n=5)  # who is using the most right now
+m.timeseries(seconds=300)  # per second, for a chart
+```
+
+or `python scripts/tokenguard_stats.py top`. Details, storage layout and limits:
+[docs/metrics.md](docs/metrics.md).
+
+## Dashboard
+
+A React dashboard (`dashboard/`) shows live traffic over the WebSocket: an
+allowed-vs-blocked chart, top consumers, per-key bucket levels, and a rule
+editor that changes limits live and shows the before/after. Run it with
+`npm install && npm run dev` in `dashboard/`, next to the Django server and
+`manage.py tokenguard_feed`. Details: [docs/dashboard.md](docs/dashboard.md).
+
 ## Configuration reference
 
 | Setting | Default | Meaning |
@@ -269,6 +305,9 @@ Details, what happens to existing counters, and a demo (`scripts/demo_live_rules
 | `RULES` | `[]` | Per-route overrides (below); first match wins |
 | `EXEMPT` | `[]` | Regexes for paths that are never limited |
 | `TRUSTED_PROXIES` | `[]` | IPs/CIDRs allowed to set `X-Forwarded-For` |
+| `METRICS` | `False` | Record every decision for the dashboard and the stats API |
+| `METRICS_RETENTION` | `3600` | Seconds of metrics history kept in Redis |
+| `METRICS_MAX_CONSUMERS` | `1000` | Consumers kept per minute, per ranking |
 | `ON_NEAR_LIMIT` | `None` | Callable (or dotted path) called when a budget passes 80% |
 
 `capacity` is the burst size, `refill_rate` is tokens per second.
@@ -386,6 +425,12 @@ request -> Django middleware / @rate_limit -> live rule override (cached, option
   test under many threads and many processes.
 - **`RuleStore`** (`tokenguard.rulestore`) keeps live rule overrides in one Redis hash
   with an atomic version counter, and caches them per process.
+- **Metrics** (`tokenguard.metrics`): `MetricsRecorder` writes one Lua call per decision
+  (per-second counters in a per-minute hash, plus two sorted sets for top consumers);
+  `MetricsReader` answers the questions. Everything expires on its own.
+- **Dashboard path**: staff-only REST API (DRF) and a WebSocket (Channels). A separate
+  `tokenguard_feed` process computes one snapshot per second and fans it out through
+  the channel layer, so Redis does the same work for one viewer or fifty.
 
 ## Correctness under concurrency
 
@@ -424,6 +469,14 @@ atomically. See [docs/race-condition.md](docs/race-condition.md) for the reprodu
   hash tag and are checked and charged together, so a rejected request leaves no trace.
 - **The engine applies model weights**, so views and usage hooks only ever deal with
   raw tokens.
+- **Metrics in Redis, not in process memory.** Every worker and server sees the same
+  numbers, and nothing is lost when one restarts. The price is one Lua call per
+  decision, which Week 7 measures.
+- **One feed process, not one loop per connection.** The snapshot is computed once a
+  second and broadcast, so load on Redis does not grow with the number of viewers.
+- **The connection is an explicit state machine** (connected, reconnecting,
+  disconnected) with doubling, capped backoff, so the UI never guesses; it is
+  tested without a browser using a fake socket and a fake clock.
 - **A sliding-window log, not the cheaper counter.** The counter assumes traffic was
   spread evenly through the last window, so a burst packed at a window's end can still
   slip nearly double through. The log is exact, and costs memory and time proportional
@@ -436,6 +489,9 @@ atomically. See [docs/race-condition.md](docs/race-condition.md) for the reprodu
   known rules if Redis is down, and ignores damaged or inapplicable overrides.
 
 ## Running the demo and tests
+
+The dashboard and its traffic generator are covered in [docs/dashboard.md](docs/dashboard.md)
+and [docs/demo-script.md](docs/demo-script.md) (a 60-second walkthrough).
 
 ```bash
 git clone https://github.com/<your-username>/tokenguard && cd tokenguard
@@ -450,12 +506,17 @@ python scripts/demo_llm.py             # the LLM demo (server must be running)
 python scripts/compare_algorithms.py   # edge burst, memory and speed per algorithm
 python scripts/demo_live_rules.py      # change a limit live (needs LIVE_RULES on)
 python scripts/tokenguard_rules.py list    # inspect or change live rules
+python scripts/tokenguard_stats.py top     # who is using the most right now
+python scripts/load_demo.py                # traffic for the dashboard
+python scripts/demo_check.py               # is everything up for a demo?
+python demo/manage.py tokenguard_feed      # feeds the dashboard (WebSocket)
+(cd dashboard && npm install && npm run dev && npm test)   # the React dashboard
 ```
 
 Demo endpoints: `/api/ping/` (default rule), `/api/report/` (decorator, costs 5
 tokens), `/login/` (route rule, fail-closed), `/api/chat/` (DRF view),
 `/health/` (exempt), `/api/config/` (shows the active settings), `/api/fixed/` (a
-fixed-window view), `/api/summary/` (class-based view), and the mock LLM API: `/api/llm/chat/`, `/api/complete/`, `/api/complete-manual/`, `/api/budgeted/`.
+fixed-window view), `/api/keyed/` (one bucket per `X-API-Key`), `/api/summary/` (class-based view), and the mock LLM API: `/api/llm/chat/`, `/api/complete/`, `/api/complete-manual/`, `/api/budgeted/`.
 
 ## Limitations
 
@@ -477,8 +538,15 @@ fixed-window view), `/api/summary/` (class-based view), and the mock LLM API: `/
 - The sliding window stores one Redis entry per request in the window, so it suits
   small limits (tens per key), not thousands.
 - Live rule changes: there is a delay of up to `LIVE_RULES_TTL` seconds, anyone who can
-  write to Redis can change limits (protect it; an authenticated rules API comes with
-  the dashboard), and the rules hash must not be evicted.
+  write to Redis can change limits (protect it), and the rules hash must not be evicted.
+  The staff-only rules API and dashboard are the authenticated way to change them.
+- Metrics cost one extra Redis call per limited request (Week 7 measures it). Each
+  minute keeps at most `METRICS_MAX_CONSUMERS` consumers per ranking, so a long tail
+  of one-off keys may be missing from the top lists. Times come from the app server's
+  clock.
+- Dashboard: the "most blocked" panel is a ranking per key, not a log of requests;
+  bucket levels are not available for budgeted rules; chart history lives in the
+  browser tab; it needs the `tokenguard_feed` process running to update.
 
 ## Roadmap
 
@@ -487,6 +555,6 @@ fixed-window view), `/api/summary/` (class-based view), and the mock LLM API: `/
 - [x] Week 3: Django decorator, middleware, headers, fail modes
 - [x] Week 4: LLM token-aware charging, per-model buckets, budgets, mock LLM demo
 - [x] Week 5: three algorithms behind one interface, live rule changes
-- [ ] Week 6: metrics and React dashboard
+- [x] Week 6: metrics, staff REST API, WebSocket feed, React dashboard
 - [ ] Week 7: load tests and hardening
 - [ ] Week 8: PyPI release and write-up

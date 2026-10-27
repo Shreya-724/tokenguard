@@ -1,0 +1,14 @@
+{
+  "started": "2026-10-27T13:31:31",
+  "platform": "Windows-10-10.0.19045-SP0",
+  "cpus": 4,
+  "python": "3.11.4",
+  "redis": "7.4.11",
+  "locust": "2.47.0",
+  "users": 50,
+  "duration": "10s (+5s warmup)",
+  "repeats": 1,
+  "metrics": true,
+  "live_rules": true,
+  "label": ""
+}
