@@ -96,6 +96,7 @@ def test_overhead_is_limited_minus_baseline(tmp_path):
     extra = report.collect(make_run(tmp_path))["allowed"]["overhead"]
     assert extra["rps_change_pct"] == pytest.approx(-20.0)
     assert extra["avg_ms"] == pytest.approx(1.5)
+    assert extra["ms_per_req"] == pytest.approx(1000 / 800 - 1000 / 1000)
     assert extra["p50_ms"] == 1 and extra["p95_ms"] == 2 and extra["p99_ms"] == 8
 
 

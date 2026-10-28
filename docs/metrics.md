@@ -97,3 +97,25 @@ python scripts/tokenguard_stats.py watch
 
 `python scripts/demo_metrics.py` shows all of it with simulated traffic and no
 server.
+
+## Taking the write off the request path
+
+By default every decision is recorded with its own Redis call, so an allowed
+request makes two round trips (the decision, then the record). Set
+
+```python
+TOKENGUARD = {..., "METRICS": True, "METRICS_FLUSH_INTERVAL": 0.2}
+```
+
+and `record()` only appends to an in-process queue. A background thread (one per
+process, started on first use) sends the queue every 0.2 s, merging samples of
+the same second and consumer first, in a single pipelined round trip.
+
+What you give up:
+
+- Numbers reach Redis up to `METRICS_FLUSH_INTERVAL` seconds late (the dashboard
+  already works in whole seconds, so this is mostly invisible).
+- If the process is killed (not stopped), the queued samples are lost. A normal
+  shutdown flushes them.
+- The queue holds 10,000 samples. If Redis cannot keep up, further samples are
+  dropped and counted in `recorder.dropped`; a request is never slowed or failed.

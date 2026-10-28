@@ -34,6 +34,7 @@ DEFAULTS: dict[str, Any] = {
     "METRICS": False,  # True: record every decision (see tokenguard.metrics)
     "METRICS_RETENTION": DEFAULT_RETENTION,  # seconds of history kept
     "METRICS_MAX_CONSUMERS": DEFAULT_MAX_CONSUMERS,  # per minute, per ranking
+    "METRICS_FLUSH_INTERVAL": 0.0,  # >0: write metrics in batches, off the request
     "ON_NEAR_LIMIT": None,  # callable(event) or dotted path, for budget alerts
 }
 
@@ -89,9 +90,15 @@ def get_rule_store() -> RuleStore:
 
 
 @functools.lru_cache(maxsize=8)
-def _recorder(client, prefix: str, retention: int, max_consumers: int):
+def _recorder(
+    client, prefix: str, retention: int, max_consumers: int, flush_interval: float
+):
     return MetricsRecorder(
-        client, key_prefix=prefix, retention=retention, max_consumers=max_consumers
+        client,
+        key_prefix=prefix,
+        retention=retention,
+        max_consumers=max_consumers,
+        flush_interval=flush_interval,
     )
 
 
@@ -104,6 +111,7 @@ def get_metrics_recorder() -> MetricsRecorder | None:
         f"{get_setting('KEY_PREFIX')}:",
         int(get_setting("METRICS_RETENTION")),
         int(get_setting("METRICS_MAX_CONSUMERS")),
+        float(get_setting("METRICS_FLUSH_INTERVAL")),
     )
 
 

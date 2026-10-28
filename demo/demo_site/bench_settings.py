@@ -4,6 +4,7 @@
     BENCH_MODE=limited    the /bench/ views run behind tokenguard (default)
 
     BENCH_METRICS=0       turn off dashboard metrics (one fewer Redis call)
+    BENCH_METRICS_FLUSH=0.2   write metrics in the background, in batches
     BENCH_LIVE_RULES=0    turn off live rule overrides
 
 Everything else comes from demo_site.settings, so the two modes differ in
@@ -22,7 +23,7 @@ if BENCH_MODE not in ("baseline", "limited"):
 
 DEBUG = False
 ALLOWED_HOSTS = ["*"]
-REDIS_URL = os.getenv("BENCH_REDIS_URL", "redis://localhost:6379/5")  # db 5: throwaway
+REDIS_URL = os.getenv("BENCH_REDIS_URL", "redis://127.0.0.1:6379/5")  # db 5: throwaway
 
 MIDDLEWARE = [m for m in MIDDLEWARE if "TokenGuardMiddleware" not in m]
 LOGGING = {  # per-request log lines would be measured too
@@ -37,6 +38,7 @@ TOKENGUARD = {
     "REDIS_URL": REDIS_URL,
     "METRICS": os.getenv("BENCH_METRICS", "1") == "1",
     "LIVE_RULES": os.getenv("BENCH_LIVE_RULES", "1") == "1",
+    "METRICS_FLUSH_INTERVAL": float(os.getenv("BENCH_METRICS_FLUSH", "0")),
     "KEY_PREFIX": "bench",
     "FAIL_MODE": "closed",  # a Redis failure must show up as errors, not as speed
 }

@@ -290,6 +290,61 @@ editor that changes limits live and shows the before/after. Run it with
 `npm install && npm run dev` in `dashboard/`, next to the Django server and
 `manage.py tokenguard_feed`. Details: [docs/dashboard.md](docs/dashboard.md).
 
+## Performance
+
+How much the limiter costs, measured with Locust against a real Django server
+(same views with and without the limiter), and what was done about it. How to
+reproduce: [benchmarks/README.md](benchmarks/README.md).
+
+Every allowed request makes one Redis round trip for the decision. With
+`METRICS` on and the default `METRICS_FLUSH_INTERVAL = 0` it makes a second one
+to record the decision for the dashboard. Setting `METRICS_FLUSH_INTERVAL` (for
+example `0.2`) queues the samples and writes them from a background thread, in
+one batched round trip per interval: the request path is back to one round trip,
+at the price of dashboard numbers arriving up to that long late and the samples
+of a killed (not stopped) process being lost.
+
+<!-- bench:start -->
+
+- platform: Windows-10-10.0.19045-SP0
+- cpus: 4
+- redis: 7.4.11
+- users: 50
+- before: 2026-10-28T12:39:55 (metrics=True, metrics_flush=0.0)
+- after: 2026-10-28T12:51:56 (metrics=True, metrics_flush=0.2)
+
+**allowed**
+
+| | before | after | change |
+|---|---:|---:|---:|
+| limited: req/s | 226.55 | 277.75 | +22.6% |
+| limited: ms/req | 4.41 | 3.60 | -18.4% |
+| limiter cost: ms/req over baseline | 1.59 | 0.89 | -0.70 ms |
+| limiter cost: req/s vs baseline | -36.00 | -24.70 | +11.3 pts |
+| baseline: req/s (noise check) | 354.01 | 368.85 | +4.2% |
+
+**blocked**
+
+| | before | after | change |
+|---|---:|---:|---:|
+| limited: req/s | 218.08 | 269.96 | +23.8% |
+| limited: ms/req | 4.59 | 3.70 | -19.2% |
+| limiter cost: ms/req over baseline | 1.93 | 1.15 | -0.78 ms |
+| limiter cost: req/s vs baseline | -42.11 | -30.94 | +11.2 pts |
+| baseline: req/s (noise check) | 376.69 | 390.91 | +3.8% |
+
+**distinct**
+
+| | before | after | change |
+|---|---:|---:|---:|
+| limited: req/s | 239.56 | 294.03 | +22.7% |
+| limited: ms/req | 4.17 | 3.40 | -18.5% |
+| limiter cost: ms/req over baseline | 1.50 | 0.74 | -0.77 ms |
+| limiter cost: req/s vs baseline | -36.01 | -21.63 | +14.4 pts |
+| baseline: req/s (noise check) | 374.34 | 375.18 | +0.2% |
+
+<!-- bench:end -->
+
 ## Configuration reference
 
 | Setting | Default | Meaning |
@@ -308,6 +363,7 @@ editor that changes limits live and shows the before/after. Run it with
 | `METRICS` | `False` | Record every decision for the dashboard and the stats API |
 | `METRICS_RETENTION` | `3600` | Seconds of metrics history kept in Redis |
 | `METRICS_MAX_CONSUMERS` | `1000` | Consumers kept per minute, per ranking |
+| `METRICS_FLUSH_INTERVAL` | `0` | Seconds between background metrics writes; `0` writes on the request path (see Performance) |
 | `ON_NEAR_LIMIT` | `None` | Callable (or dotted path) called when a budget passes 80% |
 
 `capacity` is the burst size, `refill_rate` is tokens per second.

@@ -44,6 +44,7 @@ def parse_stats(path):
 def combine(runs):
     """One result from several repeats: medians, summed counts."""
     out = {key: statistics.median(run[key] for run in runs) for key in METRICS}
+    out["ms_per_req"] = 1000 / out["rps"] if out["rps"] else 0.0
     out["requests"] = sum(run["requests"] for run in runs)
     out["failures"] = sum(run["failures"] for run in runs)
     out["repeats"] = len(runs)
@@ -60,6 +61,7 @@ def overhead(base, limited):
         "p95_ms": limited["p95"] - base["p95"],
         "p99_ms": limited["p99"] - base["p99"],
         "avg_ms": limited["avg"] - base["avg"],
+        "ms_per_req": limited["ms_per_req"] - base["ms_per_req"],
     }
 
 
@@ -97,7 +99,14 @@ def render_markdown(results, meta=None):
     if meta:
         keys = ("started", "platform", "cpus", "python", "redis", "locust")
         lines += [f"- {k}: {meta[k]}" for k in keys if k in meta]
-        for key in ("users", "duration", "repeats", "metrics", "live_rules"):
+        for key in (
+            "users",
+            "duration",
+            "repeats",
+            "metrics",
+            "metrics_flush",
+            "live_rules",
+        ):
             if key in meta:
                 lines.append(f"- {key}: {meta[key]}")
         lines.append("")
@@ -105,23 +114,27 @@ def render_markdown(results, meta=None):
         "Latency in milliseconds, throughput in requests per second. Each row is "
         "the median of the repeats; `rps range` is the lowest and highest repeat. "
         "Locust rounds percentiles to whole milliseconds, so a difference under "
-        "1 ms shows up in `avg` and in req/s, not in p50/p95/p99.",
+        "1 ms shows up in `avg` and in req/s, not in p50/p95/p99. `ms/req` is "
+        "1000 / req/s: the server time one request costs when the server is "
+        "saturated. Under load, latency is mostly queueing, so compare `ms/req`, "
+        "not p50.",
         "",
     ]
     for scenario in sorted(results):
         lines += [f"## {scenario}", ""]
         lines.append(
-            "| mode | req/s | rps range | avg | p50 | p95 | p99 | max "
+            "| mode | req/s | ms/req | rps range | avg | p50 | p95 | p99 | max "
             "| fail | 200 | 429 |"
         )
-        lines.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
+        lines.append("|---|" + "---:|" * 11)
         for mode in ("baseline", "limited"):
             r = results[scenario].get(mode)
             if not r:
                 continue
             st = r.get("status", {})
             lines.append(
-                f"| {mode} | {r['rps']:.0f} | {r['rps_min']:.0f}-{r['rps_max']:.0f} "
+                f"| {mode} | {r['rps']:.0f} | {r['ms_per_req']:.2f} "
+                f"| {r['rps_min']:.0f}-{r['rps_max']:.0f} "
                 f"| {r['avg']:.2f} | {r['p50']:.0f} | {r['p95']:.0f} "
                 f"| {r['p99']:.0f} | {r['max']:.0f} "
                 f"| {r['failures']} | {st.get('200', '-')} | {st.get('429', '-')} |"
@@ -129,7 +142,8 @@ def render_markdown(results, meta=None):
         extra = results[scenario].get("overhead")
         if extra:
             lines.append(
-                f"| **overhead** | {extra['rps_change_pct']:+.1f}% | | "
+                f"| **overhead** | {extra['rps_change_pct']:+.1f}% "
+                f"| {extra['ms_per_req']:+.2f} | | "
                 f"{extra['avg_ms']:+.2f} | {extra['p50_ms']:+.0f} "
                 f"| {extra['p95_ms']:+.0f} | {extra['p99_ms']:+.0f} | | | | |"
             )

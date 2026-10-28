@@ -8,6 +8,10 @@
   scenarios) that runs the same views with and without the limiter, a reporter
   that turns the raw CSVs into a table, and a limiter-only latency benchmark.
 - `demo_site.bench_settings` and the `/bench/` views used by the load test.
+- `METRICS_FLUSH_INTERVAL`: write metrics in batches from a background thread
+  instead of one Redis call per request (off by default).
+- `benchmarks/profile_limiter.py` (round trips and time per decision) and
+  `benchmarks/compare.py` (before/after table, README injection).
 
 ## 0.5.0
 

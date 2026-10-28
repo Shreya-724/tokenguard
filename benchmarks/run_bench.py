@@ -49,7 +49,7 @@ def parse_args(argv=None):
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument(
         "--redis",
-        default="redis://localhost:6379/5",
+        default="redis://127.0.0.1:6379/5",
         help="a THROWAWAY database: it is emptied before every run",
     )
     parser.add_argument(
@@ -57,6 +57,12 @@ def parse_args(argv=None):
     )
     parser.add_argument(
         "--live-rules", action=argparse.BooleanOptionalAction, default=True
+    )
+    parser.add_argument(
+        "--metrics-flush",
+        type=float,
+        default=0.0,
+        help="seconds between background metrics writes (0 = on the request path)",
     )
     parser.add_argument("--label", default="", help="added to the run folder name")
     return parser.parse_args(argv)
@@ -96,6 +102,7 @@ def start_server(args, mode):
         "BENCH_REDIS_URL": args.redis,
         "BENCH_METRICS": "1" if args.metrics else "0",
         "BENCH_LIVE_RULES": "1" if args.live_rules else "0",
+        "BENCH_METRICS_FLUSH": str(args.metrics_flush),
     }
     cmd = [
         sys.executable, "-m", "daphne", "-v", "0",
@@ -169,6 +176,7 @@ def main(argv=None):
         "repeats": args.repeats,
         "metrics": args.metrics,
         "live_rules": args.live_rules,
+        "metrics_flush": args.metrics_flush,
         "label": args.label,
     }
     (run_dir / "meta.json").write_text(json.dumps(meta, indent=2))

@@ -1,0 +1,49 @@
+== by time inside each function (tottime) ==
+         2115001 function calls (2106001 primitive calls) in 7.279 seconds
+
+   Ordered by: internal time
+   List reduced from 126 to 15 due to restriction <15>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+    12000    3.611    0.000    3.611    0.000 {method 'recv' of '_socket.socket' objects}
+     6000    0.359    0.000    0.848    0.000 C:\Users\udesna\Desktop\tokenguard\.venv\Lib\site-packages\redis\connection.py:152(pack)
+     6000    0.296    0.000    0.296    0.000 {method 'sendall' of '_socket.socket' objects}
+    75000    0.275    0.000    0.414    0.000 C:\Users\udesna\Desktop\tokenguard\.venv\Lib\site-packages\redis\_parsers\encoders.py:14(encode)
+   459000    0.147    0.000    0.216    0.000 {built-in method builtins.isinstance}
+    12000    0.134    0.000    3.831    0.000 C:\Users\udesna\Desktop\tokenguard\.venv\Lib\site-packages\redis\_parsers\socket.py:46(_read_from_socket)
+15000/6000    0.099    0.000    3.840    0.001 C:\Users\udesna\Desktop\tokenguard\.venv\Lib\site-packages\redis\_parsers\resp3.py:59(_read_response)
+     6000    0.099    0.000    6.550    0.001 C:\Users\udesna\Desktop\tokenguard\.venv\Lib\site-packages\redis\client.py:869(_execute_command)
+     6000    0.098    0.000    0.278    0.000 C:\Users\udesna\Desktop\tokenguard\.venv\Lib\site-packages\redis\connection.py:3342(release)
+     6000    0.081    0.000    6.841    0.001 C:\Users\udesna\Desktop\tokenguard\.venv\Lib\site-packages\redis\commands\core.py:10917(__call__)
+    12000    0.074    0.000    0.087    0.000 C:\Users\udesna\Desktop\tokenguard\.venv\Lib\site-packages\redis\utils.py:194(_get_filterable_args)
+    15000    0.070    0.000    3.677    0.000 C:\Users\udesna\Desktop\tokenguard\.venv\Lib\site-packages\redis\_parsers\socket.py:112(readline)
+     6000    0.068    0.000    0.552    0.000 C:\Users\udesna\Desktop\tokenguard\.venv\Lib\site-packages\redis\connection.py:3233(get_connection)
+   150000    0.057    0.000    0.057    0.000 {method 'encode' of 'str' objects}
+    12000    0.057    0.000    0.078    0.000 C:\Users\udesna\Desktop\tokenguard\.venv\Lib\site-packages\redis\observability\attributes.py:383(get_pool_name)
+
+
+
+== by time including callees (cumulative) ==
+         2115001 function calls (2106001 primitive calls) in 7.279 seconds
+
+   Ordered by: cumulative time
+   List reduced from 126 to 15 due to restriction <15>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+     3000    0.019    0.000    7.279    0.002 C:\Users\udesna\Desktop\tokenguard\benchmarks\profile_limiter.py:140(check_and_metrics)
+     6000    0.081    0.000    6.841    0.001 C:\Users\udesna\Desktop\tokenguard\.venv\Lib\site-packages\redis\commands\core.py:10917(__call__)
+     6000    0.014    0.000    6.676    0.001 C:\Users\udesna\Desktop\tokenguard\.venv\Lib\site-packages\redis\commands\core.py:11280(evalsha)
+     6000    0.017    0.000    6.662    0.001 C:\Users\udesna\Desktop\tokenguard\.venv\Lib\site-packages\redis\commands\core.py:11255(_evalsha)
+     6000    0.034    0.000    6.645    0.001 C:\Users\udesna\Desktop\tokenguard\benchmarks\profile_limiter.py:64(execute_command)
+     6000    0.021    0.000    6.571    0.001 C:\Users\udesna\Desktop\tokenguard\.venv\Lib\site-packages\redis\client.py:866(execute_command)
+     6000    0.099    0.000    6.550    0.001 C:\Users\udesna\Desktop\tokenguard\.venv\Lib\site-packages\redis\client.py:869(_execute_command)
+    12000    0.028    0.000    5.437    0.000 C:\Users\udesna\Desktop\tokenguard\.venv\Lib\site-packages\redis\retry.py:101(call_with_retry)
+     6000    0.021    0.000    5.389    0.001 C:\Users\udesna\Desktop\tokenguard\.venv\Lib\site-packages\redis\client.py:890(<lambda>)
+     6000    0.039    0.000    5.368    0.001 C:\Users\udesna\Desktop\tokenguard\.venv\Lib\site-packages\redis\client.py:794(_send_command_parse_response)
+     6000    0.040    0.000    4.056    0.001 C:\Users\udesna\Desktop\tokenguard\.venv\Lib\site-packages\redis\client.py:928(parse_response)
+     6000    0.036    0.000    3.986    0.001 C:\Users\udesna\Desktop\tokenguard\.venv\Lib\site-packages\redis\connection.py:1393(read_response)
+     6000    0.033    0.000    3.931    0.001 C:\Users\udesna\Desktop\tokenguard\.venv\Lib\site-packages\redis\_parsers\resp3.py:32(read_response)
+15000/6000    0.099    0.000    3.840    0.001 C:\Users\udesna\Desktop\tokenguard\.venv\Lib\site-packages\redis\_parsers\resp3.py:59(_read_response)
+    12000    0.134    0.000    3.831    0.000 C:\Users\udesna\Desktop\tokenguard\.venv\Lib\site-packages\redis\_parsers\socket.py:46(_read_from_socket)
+
+

@@ -22,6 +22,12 @@ Cost: one Lua call (one round trip) per decision, and nothing here ever raises
 into a request: if Redis is slow or down, the sample is dropped and counted in
 `recorder.dropped`.
 
+Buffered mode (`flush_interval > 0`) takes that round trip off the request path.
+Samples wait in a bounded in-process queue; a background thread merges the ones
+for the same second and consumer, and sends them all in one pipelined round trip
+every `flush_interval` seconds. The numbers show up in Redis up to that long
+later, and samples still queued when a process is killed (not stopped) are lost.
+
 Limits worth knowing:
 
 * "tokens" are the cost units the rule charges (1 per request for a plain
@@ -34,8 +40,12 @@ Limits worth knowing:
 
 from __future__ import annotations
 
+import atexit
+import collections
 import logging
 import math
+import os
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -52,6 +62,7 @@ _SEP = "\x1f"  # between scope and identity inside a sorted-set member
 
 DEFAULT_RETENTION = 3600  # seconds of history kept
 DEFAULT_MAX_CONSUMERS = 1000  # per minute, per sorted set
+DEFAULT_MAX_PENDING = 10_000  # buffered mode: samples held before dropping
 
 
 def _member(scope: str, identity: str) -> str:
@@ -184,11 +195,25 @@ class MetricsRecorder:
         retention: int = DEFAULT_RETENTION,
         max_consumers: int = DEFAULT_MAX_CONSUMERS,
         clock: Clock | None = None,
+        flush_interval: float = 0.0,
+        max_pending: int = DEFAULT_MAX_PENDING,
     ) -> None:
         if retention < 60:
             raise ValueError("retention must be at least 60 seconds")
         if max_consumers < 1:
             raise ValueError("max_consumers must be at least 1")
+        if flush_interval < 0:
+            raise ValueError("flush_interval must be 0 (off) or more")
+        if max_pending < 1:
+            raise ValueError("max_pending must be at least 1")
+        self._client = client
+        self._interval = float(flush_interval)
+        self._max_pending = int(max_pending)
+        self._pending: collections.deque[tuple[Any, ...]] = collections.deque()
+        self._thread: threading.Thread | None = None
+        self._pid = os.getpid()
+        self._stop = threading.Event()
+        self._start_lock = threading.Lock()
         self._prefix = key_prefix
         self._retention = int(retention)
         self._max = int(max_consumers)
@@ -208,33 +233,136 @@ class MetricsRecorder:
         if tokens:
             self._write(scope, identity, 0, 0, tokens)
 
-    def _write(
-        self, scope: str, identity: str, allowed: int, blocked: int, tokens: float
-    ) -> None:
-        now = self._clock.now()
-        minute = int(now // 60)
-        keys = [
+    def _keys(self, minute: int) -> list[str]:
+        return [
             f"{self._prefix}metrics:{minute}",
             f"{self._prefix}metrics:top:{minute}",
             f"{self._prefix}metrics:blk:{minute}",
         ]
+
+    def _args(
+        self,
+        sec: int,
+        scope: str,
+        member: str,
+        allowed: int,
+        blocked: int,
+        tokens: float,
+    ) -> list[Any]:
+        return [
+            sec,
+            scope,
+            member,
+            allowed,
+            blocked,
+            repr(float(tokens)) if tokens else 0,
+            self._retention + 120,
+            self._max,
+        ]
+
+    def _write(
+        self, scope: str, identity: str, allowed: int, blocked: int, tokens: float
+    ) -> None:
+        now = self._clock.now()
+        member = _member(scope, identity)
+        if self._interval:
+            self._enqueue(
+                (int(now // 60), int(now % 60), scope, member, allowed, blocked, tokens)
+            )
+            return
         try:
             self._script(
-                keys=keys,
-                args=[
-                    int(now % 60),
-                    scope,
-                    _member(scope, identity),
-                    allowed,
-                    blocked,
-                    repr(float(tokens)) if tokens else 0,
-                    self._retention + 120,
-                    self._max,
-                ],
+                keys=self._keys(int(now // 60)),
+                args=self._args(int(now % 60), scope, member, allowed, blocked, tokens),
             )
         except (redis.RedisError, OSError) as exc:
             self.dropped += 1
             logger.warning("tokenguard: metrics sample dropped: %s", exc)
+
+    # -- buffered mode -----------------------------------------------------
+
+    @property
+    def pending(self) -> int:
+        """Samples waiting to be sent (always 0 when not buffered)."""
+        return len(self._pending)
+
+    def _enqueue(self, sample: tuple[Any, ...]) -> None:
+        self._ensure_thread()
+        if len(self._pending) >= self._max_pending:
+            self.dropped += 1  # Redis is slower than traffic: shed, never block
+            return
+        self._pending.append(sample)
+
+    def _ensure_thread(self) -> None:
+        thread = self._thread
+        if thread is not None and thread.is_alive() and self._pid == os.getpid():
+            return
+        with self._start_lock:
+            if self._pid != os.getpid():  # forked: the parent's queue is not ours
+                self._pending.clear()
+                self._pid = os.getpid()
+                self._thread = None
+            if self._thread is None or not self._thread.is_alive():
+                self._stop = threading.Event()
+                self._thread = threading.Thread(
+                    target=self._loop,
+                    args=(self._stop,),
+                    name="tokenguard-metrics",
+                    daemon=True,
+                )
+                self._thread.start()
+                atexit.register(self.close)
+
+    def _loop(self, stop: threading.Event) -> None:
+        while not stop.wait(self._interval):
+            self.flush()
+        self.flush()
+
+    def flush(self) -> int:
+        """Send everything queued, in one round trip. Never raises.
+
+        Returns how many samples were sent. Samples for the same second and
+        consumer are merged first, so a busy caller costs one Lua call per
+        flush, not one per request.
+        """
+        batch = []
+        while True:
+            try:
+                batch.append(self._pending.popleft())
+            except IndexError:
+                break
+        if not batch:
+            return 0
+        merged: dict[tuple[Any, ...], list[float]] = {}
+        for minute, sec, scope, member, allowed, blocked, tokens in batch:
+            slot = merged.setdefault((minute, sec, scope, member), [0, 0, 0.0])
+            slot[0] += allowed
+            slot[1] += blocked
+            slot[2] += tokens
+        try:
+            pipe = self._client.pipeline(transaction=False)
+            for (minute, sec, scope, member), (a, b, t) in merged.items():
+                self._script(
+                    keys=self._keys(minute),
+                    args=self._args(sec, scope, member, int(a), int(b), t),
+                    client=pipe,
+                )
+            pipe.execute()
+        except (redis.RedisError, OSError) as exc:
+            self.dropped += len(batch)
+            logger.warning(
+                "tokenguard: %d metrics samples dropped: %s", len(batch), exc
+            )
+            return 0
+        return len(batch)
+
+    def close(self) -> None:
+        """Stop the background thread and send what is left. Safe to repeat."""
+        self._stop.set()
+        thread = self._thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=5)
+        self.flush()
 
 
 class MetricsReader:

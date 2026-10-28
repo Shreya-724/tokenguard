@@ -66,3 +66,32 @@ python benchmarks/limiter_bench.py redis://localhost:6379/5
 `sliding_window` is slow here because the log keeps one entry per allowed
 request and the always-allowed limit never trims it. That is the algorithm's
 real memory and time cost, shown on purpose, and Day 5 compares it properly.
+
+## Find the bottleneck (Day 3)
+
+```powershell
+python benchmarks/profile_limiter.py redis://127.0.0.1:6379/5
+```
+
+It prints round trips per call and splits the time into "in Redis" and "in
+Python" for: the check alone, the check plus the metrics write, and the check
+plus buffered metrics. `profile.txt` (in the results folder) lists the most
+expensive functions. Read it before deciding what to fix: the biggest number
+is the one to attack, whatever you expected.
+
+## Before and after (Day 4)
+
+```powershell
+python benchmarks/run_bench.py --label before
+python benchmarks/run_bench.py --label after --metrics-flush 0.2
+python benchmarks/compare.py benchmarks/results/<before-folder> benchmarks/results/<after-folder> --readme README.md
+```
+
+`compare.py` puts the table between the `bench:start` / `bench:end` markers in
+the README and prints a warning if the baseline moved more than 10% between
+the two runs (then the machine was not steady, so repeat). Run both with the
+same `--users`, close the same programs, and do not touch the machine during
+either.
+
+Use `--users 5` as well as the default 50: at 50 the server is saturated, so
+latency is mostly queueing; at 5 it is closer to the real cost of one request.

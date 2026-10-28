@@ -1,6 +1,6 @@
 """Measure the limiter itself, with no web server or Django in the way.
 
-    python benchmarks/limiter_bench.py [redis://localhost:6379/5] [--calls 5000]
+    python benchmarks/limiter_bench.py [redis://127.0.0.1:6379/5] [--calls 5000]
 
 Times one call at a time (microseconds, network round trip included) for:
 
@@ -96,7 +96,7 @@ def redis_version(client):
 
 def main(argv=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument("url", nargs="?", default="redis://localhost:6379/5")
+    parser.add_argument("url", nargs="?", default="redis://127.0.0.1:6379/5")
     parser.add_argument("--calls", type=int, default=5000)
     args = parser.parse_args(argv)
     client = redis.Redis.from_url(args.url)
