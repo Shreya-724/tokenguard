@@ -18,6 +18,7 @@ Run it on the same machine as the load test, so the two can be compared.
 
 import argparse
 import csv
+import math
 import platform
 import statistics
 import time
@@ -35,7 +36,9 @@ ALWAYS = Limit(capacity=1e9, refill_rate=1e9)
 
 def percentile(sorted_values, q):
     """Nearest-rank percentile of an already sorted list."""
-    index = max(0, min(len(sorted_values) - 1, round(q / 100 * len(sorted_values)) - 1))
+    index = max(
+        0, min(len(sorted_values) - 1, math.ceil(q / 100 * len(sorted_values)) - 1)
+    )
     return sorted_values[index]
 
 

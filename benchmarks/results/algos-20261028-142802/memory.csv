@@ -1,0 +1,16 @@
+algorithm,requests_in_key,bytes
+token_bucket,1,120
+token_bucket,10,128
+token_bucket,100,120
+token_bucket,1000,120
+token_bucket,10000,128
+fixed_window,1,112
+fixed_window,10,112
+fixed_window,100,112
+fixed_window,1000,120
+fixed_window,10000,120
+sliding_window,1,144
+sliding_window,10,728
+sliding_window,100,6232
+sliding_window,1000,114880
+sliding_window,10000,1237440

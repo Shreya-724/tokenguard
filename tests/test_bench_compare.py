@@ -77,3 +77,9 @@ def test_main_writes_the_readme(tmp_path):
     text = readme.read_text()
     assert "| limited: req/s | 150.00 | 200.00 | +33.3% |" in text
     assert "metrics_flush=0.2" in text
+
+
+def test_a_placeholder_folder_is_refused(tmp_path):
+    good = run(tmp_path, "after", 250, 200)
+    with pytest.raises(SystemExit):
+        compare.main(["<before-folder>", str(good)])

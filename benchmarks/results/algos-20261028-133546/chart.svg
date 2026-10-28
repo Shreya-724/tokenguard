@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 300" width="960" height="300" font-family="system-ui, sans-serif">
+<style>.t{font-size:14px;font-weight:600;fill:#111}.a{font-size:11px;fill:#555}.l{font-size:12px;font-weight:600}.g{stroke:#e5e5e5;stroke-width:1}</style>
+<rect width="960" height="300" fill="#fff"/>
+<text x="30.0" y="36.0" class="t" text-anchor="start">Memory of a full key (bytes)</text>
+<line x1="70" x2="370" y1="260.0" y2="260.0" class="g"/>
+<text x="62.0" y="264.0" class="a" text-anchor="end">100</text>
+<line x1="70" x2="370" y1="218.0" y2="218.0" class="g"/>
+<text x="62.0" y="222.0" class="a" text-anchor="end">1,000</text>
+<line x1="70" x2="370" y1="176.0" y2="176.0" class="g"/>
+<text x="62.0" y="180.0" class="a" text-anchor="end">10,000</text>
+<line x1="70" x2="370" y1="134.0" y2="134.0" class="g"/>
+<text x="62.0" y="138.0" class="a" text-anchor="end">100,000</text>
+<line x1="70" x2="370" y1="92.0" y2="92.0" class="g"/>
+<text x="62.0" y="96.0" class="a" text-anchor="end">1,000,000</text>
+<line x1="70" x2="370" y1="50.0" y2="50.0" class="g"/>
+<text x="62.0" y="54.0" class="a" text-anchor="end">10,000,000</text>
+<text x="107.5" y="278.0" class="a" text-anchor="middle">10</text>
+<text x="182.5" y="278.0" class="a" text-anchor="middle">100</text>
+<text x="257.5" y="278.0" class="a" text-anchor="middle">1k</text>
+<text x="332.5" y="278.0" class="a" text-anchor="middle">10k</text>
+<text x="220.0" y="298.0" class="a" text-anchor="middle">limit (requests per key)</text>
+<polyline points="107.5,255.5 182.5,256.7 257.5,255.5 332.5,255.5" fill="none" stroke="#2563eb" stroke-width="2"/>
+<circle cx="107.5" cy="255.5" r="3" fill="#2563eb"/>
+<circle cx="182.5" cy="256.7" r="3" fill="#2563eb"/>
+<circle cx="257.5" cy="255.5" r="3" fill="#2563eb"/>
+<circle cx="332.5" cy="255.5" r="3" fill="#2563eb"/>
+<polyline points="107.5,257.9 182.5,257.9 257.5,256.7 332.5,256.7" fill="none" stroke="#d97706" stroke-width="2"/>
+<circle cx="107.5" cy="257.9" r="3" fill="#d97706"/>
+<circle cx="182.5" cy="257.9" r="3" fill="#d97706"/>
+<circle cx="257.5" cy="256.7" r="3" fill="#d97706"/>
+<circle cx="332.5" cy="256.7" r="3" fill="#d97706"/>
+<polyline points="107.5,223.8 182.5,184.6 257.5,131.3 332.5,87.6" fill="none" stroke="#059669" stroke-width="2"/>
+<circle cx="107.5" cy="223.8" r="3" fill="#059669"/>
+<circle cx="182.5" cy="184.6" r="3" fill="#059669"/>
+<circle cx="257.5" cy="131.3" r="3" fill="#059669"/>
+<circle cx="332.5" cy="87.6" r="3" fill="#059669"/>
+<text x="342.5" y="91.6" class="l" text-anchor="start" fill="#059669">sliding_window</text>
+<text x="342.5" y="259.5" class="l" text-anchor="start" fill="#2563eb">token_bucket</text>
+<text x="342.5" y="273.5" class="l" text-anchor="start" fill="#d97706">fixed_window</text>
+<text x="600.0" y="36.0" class="t" text-anchor="start">check() on a full key (median microseconds)</text>
+<line x1="640" x2="840" y1="260.0" y2="260.0" class="g"/>
+<text x="632.0" y="264.0" class="a" text-anchor="end">100</text>
+<line x1="640" x2="840" y1="190.0" y2="190.0" class="g"/>
+<text x="632.0" y="194.0" class="a" text-anchor="end">1,000</text>
+<line x1="640" x2="840" y1="120.0" y2="120.0" class="g"/>
+<text x="632.0" y="124.0" class="a" text-anchor="end">10,000</text>
+<line x1="640" x2="840" y1="50.0" y2="50.0" class="g"/>
+<text x="632.0" y="54.0" class="a" text-anchor="end">100,000</text>
+<text x="665.0" y="278.0" class="a" text-anchor="middle">10</text>
+<text x="715.0" y="278.0" class="a" text-anchor="middle">100</text>
+<text x="765.0" y="278.0" class="a" text-anchor="middle">1k</text>
+<text x="815.0" y="278.0" class="a" text-anchor="middle">10k</text>
+<text x="740.0" y="298.0" class="a" text-anchor="middle">limit (requests per key)</text>
+<polyline points="665.0,185.4 715.0,172.1 765.0,194.4 815.0,193.7" fill="none" stroke="#2563eb" stroke-width="2"/>
+<circle cx="665.0" cy="185.4" r="3" fill="#2563eb"/>
+<circle cx="715.0" cy="172.1" r="3" fill="#2563eb"/>
+<circle cx="765.0" cy="194.4" r="3" fill="#2563eb"/>
+<circle cx="815.0" cy="193.7" r="3" fill="#2563eb"/>
+<polyline points="665.0,195.2 715.0,173.2 765.0,182.3 815.0,196.0" fill="none" stroke="#d97706" stroke-width="2"/>
+<circle cx="665.0" cy="195.2" r="3" fill="#d97706"/>
+<circle cx="715.0" cy="173.2" r="3" fill="#d97706"/>
+<circle cx="765.0" cy="182.3" r="3" fill="#d97706"/>
+<circle cx="815.0" cy="196.0" r="3" fill="#d97706"/>
+<polyline points="665.0,177.8 715.0,181.5 765.0,154.3 815.0,96.7" fill="none" stroke="#059669" stroke-width="2"/>
+<circle cx="665.0" cy="177.8" r="3" fill="#059669"/>
+<circle cx="715.0" cy="181.5" r="3" fill="#059669"/>
+<circle cx="765.0" cy="154.3" r="3" fill="#059669"/>
+<circle cx="815.0" cy="96.7" r="3" fill="#059669"/>
+<text x="825.0" y="100.7" class="l" text-anchor="start" fill="#059669">sliding_window</text>
+<text x="825.0" y="197.7" class="l" text-anchor="start" fill="#2563eb">token_bucket</text>
+<text x="825.0" y="211.7" class="l" text-anchor="start" fill="#d97706">fixed_window</text>
+</svg>

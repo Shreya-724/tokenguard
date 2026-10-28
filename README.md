@@ -237,7 +237,8 @@ tokenguard has three algorithms behind one interface. Pick one globally with
 
 Details, the boundary-burst demonstration and reproducible numbers:
 [docs/algorithms.md](docs/algorithms.md). Run `python scripts/compare_algorithms.py`
-to measure them on your own machine.
+to measure them on your own machine. Speed and memory per key at limits from 10 to
+10,000, with a chart: [docs/algorithm-benchmarks.md](docs/algorithm-benchmarks.md).
 
 ## Live rule changes
 
@@ -305,44 +306,9 @@ at the price of dashboard numbers arriving up to that long late and the samples
 of a killed (not stopped) process being lost.
 
 <!-- bench:start -->
-
-- platform: Windows-10-10.0.19045-SP0
-- cpus: 4
-- redis: 7.4.11
-- users: 50
-- before: 2026-10-28T12:39:55 (metrics=True, metrics_flush=0.0)
-- after: 2026-10-28T12:51:56 (metrics=True, metrics_flush=0.2)
-
-**allowed**
-
-| | before | after | change |
-|---|---:|---:|---:|
-| limited: req/s | 226.55 | 277.75 | +22.6% |
-| limited: ms/req | 4.41 | 3.60 | -18.4% |
-| limiter cost: ms/req over baseline | 1.59 | 0.89 | -0.70 ms |
-| limiter cost: req/s vs baseline | -36.00 | -24.70 | +11.3 pts |
-| baseline: req/s (noise check) | 354.01 | 368.85 | +4.2% |
-
-**blocked**
-
-| | before | after | change |
-|---|---:|---:|---:|
-| limited: req/s | 218.08 | 269.96 | +23.8% |
-| limited: ms/req | 4.59 | 3.70 | -19.2% |
-| limiter cost: ms/req over baseline | 1.93 | 1.15 | -0.78 ms |
-| limiter cost: req/s vs baseline | -42.11 | -30.94 | +11.2 pts |
-| baseline: req/s (noise check) | 376.69 | 390.91 | +3.8% |
-
-**distinct**
-
-| | before | after | change |
-|---|---:|---:|---:|
-| limited: req/s | 239.56 | 294.03 | +22.7% |
-| limited: ms/req | 4.17 | 3.40 | -18.5% |
-| limiter cost: ms/req over baseline | 1.50 | 0.74 | -0.77 ms |
-| limiter cost: req/s vs baseline | -36.01 | -21.63 | +14.4 pts |
-| baseline: req/s (noise check) | 374.34 | 375.18 | +0.2% |
-
+Not measured yet. Run `python benchmarks/run_bench.py --label before` and
+`--label after --metrics-flush 0.2`, then
+`python benchmarks/compare.py <before> <after> --readme README.md`.
 <!-- bench:end -->
 
 ## Configuration reference

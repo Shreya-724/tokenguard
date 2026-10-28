@@ -95,3 +95,19 @@ either.
 
 Use `--users 5` as well as the default 50: at 50 the server is saturated, so
 latency is mostly queueing; at 5 it is closer to the real cost of one request.
+
+## Compare the algorithms (Day 5)
+
+```powershell
+python benchmarks/algo_bench.py redis://127.0.0.1:6379/5 --docs docs
+```
+
+Time per `check()` and Redis `MEMORY USAGE` per key for the token bucket, fixed
+window and sliding window, on a brand new key and on a key whose limit is used
+up, at limits of 10, 100, 1,000 and 10,000. It writes `docs/algorithm-benchmarks.md`
+and its chart, and the raw CSVs under `results/algos-<time>/`.
+
+For limits of 1,000 and above the sliding window is filled by writing its sorted
+set directly, because filling it through `check()` is quadratic. A test confirms
+the result is byte-for-byte the same size as real requests produce. Those cells
+use at most 500 timed calls, because each call is slow; the table says how many.

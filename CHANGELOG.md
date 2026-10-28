@@ -10,6 +10,8 @@
 - `demo_site.bench_settings` and the `/bench/` views used by the load test.
 - `METRICS_FLUSH_INTERVAL`: write metrics in batches from a background thread
   instead of one Redis call per request (off by default).
+- `benchmarks/algo_bench.py`: speed and Redis memory per key for the three
+  algorithms at limits from 10 to 10,000, with a table and chart for the docs.
 - `benchmarks/profile_limiter.py` (round trips and time per decision) and
   `benchmarks/compare.py` (before/after table, README injection).
 
