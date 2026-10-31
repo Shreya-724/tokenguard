@@ -9,6 +9,7 @@
 | [metrics.md](metrics.md) | What is recorded, how it is stored, and how to query it |
 | [dashboard-backend.md](dashboard-backend.md) | The staff-only REST API, sign-in, and the WebSocket feed |
 | [dashboard.md](dashboard.md) | The React dashboard: panels, connection behaviour, look and feel |
+| [docker.md](docker.md) | Running everything with `docker compose up`, and what to do when it does not start |
 | [demo-script.md](demo-script.md) | A 60-second demo script and how to record the GIF |
 | [race-condition.md](race-condition.md) | The check-then-act race, reproduced and fixed with Lua |
 

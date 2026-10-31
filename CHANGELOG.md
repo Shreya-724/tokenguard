@@ -1,19 +1,45 @@
 # Changelog
 
-## Unreleased
+## 0.6.0
+
+Proof, performance and hardening.
+
+### Fixed
+
+- **Sliding window: a refund left a key with no expiry.** Settling a request for
+  less than was estimated removed the last log entry (which deletes the key) and
+  re-added it without a TTL, so every refunded request leaked a key that never
+  expired. Fixed in `sliding_window_adjust.lua`. If you ran an earlier version with
+  `sliding_window`, find and repair leftovers with
+  `python scripts/tokenguard_audit.py --fix`.
+- Redis "cannot answer" failures other than a dead connection (`OOM` with
+  `noeviction`, `READONLY`, `BUSY`, `MASTERDOWN`, `LOADING`) used to surface as an
+  unhandled error. They now count as "Redis unavailable", so `FAIL_MODE` decides.
+- Percentiles in the benchmark scripts used banker's rounding; now nearest-rank.
 
 ### Added
 
-- `benchmarks/`: a repeatable Locust load test (allowed, blocked and distinct-caller
-  scenarios) that runs the same views with and without the limiter, a reporter
-  that turns the raw CSVs into a table, and a limiter-only latency benchmark.
-- `demo_site.bench_settings` and the `/bench/` views used by the load test.
+- `MAX_KEY_LENGTH` (default 128): a longer identity is replaced by a fixed-size hash
+  of it, so a client cannot make a huge Redis key. `tokenguard.identity`.
+- `tokenguard.django.keys.api_key_if(check)`: limit only API keys you recognise;
+  made-up ones fall back to the IP bucket.
 - `METRICS_FLUSH_INTERVAL`: write metrics in batches from a background thread
-  instead of one Redis call per request (off by default).
-- `benchmarks/algo_bench.py`: speed and Redis memory per key for the three
-  algorithms at limits from 10 to 10,000, with a table and chart for the docs.
-- `benchmarks/profile_limiter.py` (round trips and time per decision) and
-  `benchmarks/compare.py` (before/after table, README injection).
+  instead of one Redis call per request (off by default). Measured on the author's
+  machine: about 23% more requests per second, and the limiter's cost per request
+  down from about 1.6 ms to 0.9 ms.
+- `scripts/tokenguard_audit.py`: counts keys, estimates their memory, finds keys
+  that never expire, and repairs them with `--fix`.
+- `benchmarks/`: a repeatable Locust load test (allowed, blocked and distinct-caller
+  scenarios) that runs the same views with and without the limiter; `report.py`,
+  `compare.py` (before/after table for the README), `profile_limiter.py` (round trips
+  and time per decision), `limiter_bench.py`, `algo_bench.py` (speed and memory per
+  key for the three algorithms, with a chart), `key_flood.py` (what a flood of
+  one-off callers does to Redis under each eviction policy) and `smoke_check.py`.
+- `docker compose up --build` starts Django, Redis (256 MB, `volatile-lru`) and the
+  dashboard behind nginx. See `docs/docker.md`.
+- CI: lint, unit tests, concurrency tests, an end-to-end run, a Locust smoke load
+  test, the dashboard build, and a Docker job that starts the whole stack.
+- README: Performance and Security considerations sections.
 
 ## 0.5.0
 

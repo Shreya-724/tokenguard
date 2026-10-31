@@ -6,10 +6,10 @@ A **token-aware, Redis-backed rate limiter for Django**, built for LLM APIs.
 Limit clients by *how much they consume*, not just how often they call, with
 atomic correctness under concurrency.
 
-> **Status: work in progress (v0.5.0).** The core limiter, Redis/Lua backend, Django
+> **Status: work in progress (v0.6.0).** The core limiter, Redis/Lua backend, Django
 > integration, token-aware LLM limiting with budgets, three algorithms, live rule
-> changes, metrics and a live React dashboard are done. Load tests and hardening are
-> next (see [Roadmap](#roadmap)).
+> changes, metrics, a live React dashboard, load tests and a security review are done.
+> Packaging and the PyPI release are next (see [Roadmap](#roadmap)).
 
 <!-- After recording (see docs/demo-script.md), save the GIF as docs/demo.gif and
      remove the comment markers around the image line to show it:
@@ -45,6 +45,21 @@ rate, so short bursts are fine while the long-run average stays capped.
   requests/sec, blocked ratio, top consumers and a key's bucket level
 - **Live dashboard** (React + Recharts over a WebSocket): traffic chart, top consumers,
   bucket gauge, and a rule editor that shows the before/after of a change
+
+## Run everything with one command
+
+```bash
+docker compose up --build
+```
+
+| URL | What |
+|---|---|
+| http://localhost:8080 | the dashboard (sign in as `admin` / `admin`: a public demo password) |
+| http://localhost:8000 | the demo Django site, e.g. `/api/ping/` |
+| localhost:6379 | Redis (capped at 256 MB) |
+
+Then `python scripts/load_demo.py` (from your venv) sends traffic so the dashboard
+has something to show. Details and troubleshooting: [docs/docker.md](docs/docker.md).
 
 ## Quick start (5 minutes)
 
@@ -330,6 +345,7 @@ Not measured yet. Run `python benchmarks/run_bench.py --label before` and
 | `METRICS_RETENTION` | `3600` | Seconds of metrics history kept in Redis |
 | `METRICS_MAX_CONSUMERS` | `1000` | Consumers kept per minute, per ranking |
 | `METRICS_FLUSH_INTERVAL` | `0` | Seconds between background metrics writes; `0` writes on the request path (see Performance) |
+| `MAX_KEY_LENGTH` | `128` | Longer identities (what a key function returns) are replaced by a fixed-size hash, so a client cannot make a huge Redis key |
 | `ON_NEAR_LIMIT` | `None` | Callable (or dotted path) called when a budget passes 80% |
 
 `capacity` is the burst size, `refill_rate` is tokens per second.
@@ -403,6 +419,28 @@ trusted blindly, an attacker could rotate fake IPs and never be limited.
 tokenguard **ignores it** unless the direct peer is listed in `TRUSTED_PROXIES`. It
 then reads the header from the right and takes the first address that is not one of
 your own proxies.
+
+## Security considerations
+
+What a hostile client can try, what tokenguard does about it, and what is left to you.
+`python benchmarks/key_flood.py --yes` demonstrates the memory points below on your
+own Redis.
+
+| Attack | What tokenguard does | What you must do |
+|---|---|---|
+| **Fake `X-Forwarded-For`** to look like a new client on every request | Ignores the header unless the direct peer is in `TRUSTED_PROXIES`; then reads it from the right, so entries a client adds on the left are never believed. Garbage in the header means the whole header is ignored. | List only your own proxies or load balancers, as narrowly as you can (never `0.0.0.0/0`). Make sure your proxy appends to the header rather than passing a client's through. |
+| **Rotating identities** (a made-up `X-API-Key` on every request, a new IP each time) | Each new identity gets its own full bucket, so a limiter keyed by an unverified value cannot stop this. `api_key_if(check)` limits unknown keys by IP instead. | Key by something you have verified (`user`, or `api_key_if` with a real lookup). Put an IP-keyed rule in front of anything that is keyed by a client-supplied value. |
+| **Huge identities** to bloat Redis keys | `MAX_KEY_LENGTH` (default 128): a longer identity becomes `h:` plus 32 hex characters of its SHA-256. The same long value still lands in the same bucket. API keys are always stored hashed. | Nothing, unless you need a different limit. |
+| **A flood of one-off callers** to fill Redis | Every key has a TTL (a token bucket's lives twice the time it takes to refill from empty; a window's, one window plus a second; metrics, `METRICS_RETENTION` plus two minutes). `scripts/tokenguard_audit.py` reports keys that never expire. About 220 bytes per one-off caller on the token bucket (measured). | Set `maxmemory` and `maxmemory-policy volatile-lru` on Redis (the compose file does). Prefer the token bucket or fixed window: a sliding window stores one entry per request, 1.3 MB per key at a limit of 10,000. |
+| **Budgets keyed by an unverified value** | Budget keys live 40 days (daily) and 400 days (monthly), so a flood of made-up owners is kept that long. | Only budget verified identities (`budget_key="user"`). |
+| **Redis full, down or read-only** | A timeout, a dead connection, `OOM` (full with `noeviction`), `READONLY`, `BUSY` and `LOADING` all count as "Redis unavailable", and `FAIL_MODE` decides: `open` lets the request through, `closed` answers 503. Anything else (a script error, a wrong key type) still raises, so a bug is not hidden as an outage. | Choose `closed` for rules that guard against abuse (logins) and `open` where an outage should not take your API down. Know that with `volatile-lru`, an evicted caller's bucket starts full again. |
+| **Reading or changing limits** | The rules API and dashboard are staff-only (session login with CSRF, or Basic auth), and the login endpoint is itself rate limited. | Anyone who can write to Redis can change limits and read keys: do not expose Redis (the compose file publishes 6379 for local development only), use a password and `rediss://` in production. Change the demo password `admin`/`admin`. |
+
+Two sizing numbers, both measured on the author's machine (see
+[docs/algorithm-benchmarks.md](docs/algorithm-benchmarks.md)): a token-bucket or
+fixed-window key is about 120 bytes of data, and 1 million distinct active callers
+need a few hundred MB of Redis. If you key by IP behind a proxy and forget
+`TRUSTED_PROXIES`, everyone shares the proxy's address and one bucket.
 
 ## How a token bucket works
 
@@ -562,7 +600,8 @@ fixed-window view), `/api/keyed/` (one bucket per `X-API-Key`), `/api/summary/` 
 - Live rule changes: there is a delay of up to `LIVE_RULES_TTL` seconds, anyone who can
   write to Redis can change limits (protect it), and the rules hash must not be evicted.
   The staff-only rules API and dashboard are the authenticated way to change them.
-- Metrics cost one extra Redis call per limited request (Week 7 measures it). Each
+- Metrics cost one extra Redis call per limited request, unless
+  `METRICS_FLUSH_INTERVAL` batches them (see Performance). Each
   minute keeps at most `METRICS_MAX_CONSUMERS` consumers per ranking, so a long tail
   of one-off keys may be missing from the top lists. Times come from the app server's
   clock.
@@ -578,5 +617,5 @@ fixed-window view), `/api/keyed/` (one bucket per `X-API-Key`), `/api/summary/` 
 - [x] Week 4: LLM token-aware charging, per-model buckets, budgets, mock LLM demo
 - [x] Week 5: three algorithms behind one interface, live rule changes
 - [x] Week 6: metrics, staff REST API, WebSocket feed, React dashboard
-- [ ] Week 7: load tests and hardening
+- [x] Week 7: load tests, profiling, algorithm benchmarks, Docker, CI smoke test, security review
 - [ ] Week 8: PyPI release and write-up

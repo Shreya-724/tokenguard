@@ -2,6 +2,17 @@ name: CI
 on: [push, pull_request]
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff
+      - run: ruff check .
+      - run: ruff format --check .
+
   test:
     runs-on: ubuntu-latest
     services:
@@ -24,12 +35,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: pip install -e ".[dev]"
-      - run: ruff check .
-      - run: ruff format --check .
-      - run: pytest --cov=tokenguard --cov-report=term-missing
+      - run: pip install -e ".[dev,bench]"
       - name: Django system check
         run: python demo/manage.py check
+      - name: Unit tests
+        run: pytest --ignore=tests/test_algorithms_concurrency.py --cov=tokenguard --cov-report=term-missing
+      - name: Concurrency tests (many processes against one real Redis)
+        run: pytest tests/test_algorithms_concurrency.py
       - name: End-to-end HTTP tests and the demos (real server, real Redis)
         run: |
           python demo/manage.py runserver 8000 --noreload > server.log 2>&1 &
@@ -37,6 +49,20 @@ jobs:
           python scripts/e2e_http.py http://localhost:8000
           python scripts/demo_llm.py http://localhost:8000
           python scripts/demo_live_rules.py http://localhost:8000
+          kill %1
+      - name: Smoke load test (Locust against a real server, limiter on and off)
+        if: matrix.python-version == '3.12'
+        run: |
+          python benchmarks/run_bench.py --users 10 --duration 8 --warmup 3 --repeats 1 \
+            --port 8100 --redis redis://localhost:6379/5 --label ci
+          python benchmarks/smoke_check.py "$(ls -d benchmarks/results/*-ci | tail -1)"
+      - name: Keep the load-test files
+        if: always() && matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-load-test
+          path: benchmarks/results/
+          if-no-files-found: ignore
       - name: Show server log on failure
         if: failure()
         run: cat server.log
@@ -55,3 +81,22 @@ jobs:
       - run: npm install --no-audit --no-fund
       - run: npm test
       - run: npm run build
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and start everything with one command
+        run: docker compose up --build --wait --wait-timeout 180
+      - name: The dashboard is served, and its API calls reach Django
+        run: |
+          curl -sf http://localhost:8080/ | grep -qi "<div id=\"root\""
+          code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/tokenguard/session/)
+          echo "session endpoint through the dashboard: HTTP $code"
+          test "$code" = "200" -o "$code" = "401" -o "$code" = "403"
+          curl -sf http://localhost:8000/health/
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose logs
+      - run: docker compose down -v
+        if: always()

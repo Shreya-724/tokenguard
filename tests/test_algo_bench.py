@@ -68,8 +68,9 @@ def test_sliding_memory_grows_with_the_limit_and_the_others_do_not(
     rows = algo_bench.measure_memory(redis_client, prefix, (10, 100))
     size = {(name, requests): b for name, requests, b in rows}
     assert size[("sliding_window", 100)] > 4 * size[("sliding_window", 10)]
-    assert size[("token_bucket", 100)] == size[("token_bucket", 10)]
-    assert size[("fixed_window", 100)] == size[("fixed_window", 10)]
+    # one fixed-size value: the limit does not change it (allocator rounding aside)
+    assert abs(size[("token_bucket", 100)] - size[("token_bucket", 10)]) <= 32
+    assert abs(size[("fixed_window", 100)] - size[("fixed_window", 10)]) <= 32
 
 
 def test_writing_the_sliding_log_directly_matches_real_requests(redis_client, prefix):

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tokenguard"
-version = "0.5.0"
+version = "0.6.0"
 description = "A token-aware, Redis-backed rate limiter for Django, built for LLM APIs"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -14,6 +14,10 @@ dependencies = ["redis>=5.0"]
 django = ["django>=4.2"]
 drf = ["django>=4.2", "djangorestframework>=3.14"]
 dashboard = [
+    # redis 8 made socket_timeout default to 5 s, which equals channels-redis's
+    # blocking wait and drops idle WebSockets every ~5 s (django/channels_redis#422).
+    # Remove the cap once a channels-redis release fixes it.
+    "redis>=5.0,<8",
     "django>=4.2",
     "djangorestframework>=3.14",
     "channels>=4.0",
@@ -22,6 +26,7 @@ dashboard = [
 ]
 bench = ["locust>=2.20", "daphne>=4.0", "djangorestframework>=3.14", "django>=4.2"]
 dev = [
+    "redis>=5.0,<8",  # see the note under `dashboard`
     "pytest",
     "pytest-cov",
     "pytest-django",

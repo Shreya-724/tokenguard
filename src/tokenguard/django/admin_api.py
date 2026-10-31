@@ -21,6 +21,7 @@ from tokenguard.django.conf import (
 )
 from tokenguard.django.engine import Rule, effective_rule
 from tokenguard.errors import RedisUnavailableError
+from tokenguard.identity import bound_identity
 from tokenguard.rulestore import validate_override
 
 REDIS_DOWN = (redis.RedisError, RedisUnavailableError)
@@ -170,7 +171,9 @@ def bucket(key: str) -> dict[str, Any]:
     if not matches:
         raise ApiError(404, "no known rule matches this key; keys look like scope:id")
     scope = max(matches, key=len)  # "api" vs "api:v2": the most specific wins
-    identity = key[len(scope) + 1 :]
+    # The same bounding the limiter applies, or the gauge would read a bucket
+    # that does not exist for an overlong identity.
+    identity = bound_identity(key[len(scope) + 1 :], get_setting("MAX_KEY_LENGTH"))
     rule = effective_rule(rules[scope][1])
     if rule.budget is not None:
         raise ApiError(422, "bucket levels for budgeted rules are not available yet")

@@ -31,7 +31,7 @@ ASGI_APPLICATION = "demo_site.asgi.application"
 CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels_redis.core.RedisChannelLayer",
-        "CONFIG": {"hosts": [REDIS_URL]},
+        "CONFIG": {"hosts": [{"address": REDIS_URL, "socket_timeout": 10}]},
     }
 }
 DATABASES = {

@@ -62,5 +62,11 @@ elseif delta < 0 then
     used = used - take
     owed = owed - take
   end
+  -- Removing the last entry deletes the key, and re-adding it creates a new key
+  -- with NO expiry. Without this line every refunded request would leave an
+  -- immortal key behind.
+  if redis.call('EXISTS', KEYS[1]) == 1 then
+    redis.call('PEXPIRE', KEYS[1], math.ceil(window * 1000) + 1000)
+  end
 end
 return string.format('%.17g', limit - used)

@@ -49,7 +49,11 @@ ASGI_APPLICATION = "demo_site.asgi.application"
 CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels_redis.core.RedisChannelLayer",
-        "CONFIG": {"hosts": [REDIS_URL]},
+        # socket_timeout must be above 5: with redis-py 8 the default (5 s) equals
+        # channels-redis's blocking wait, and idle WebSockets are dropped every ~5 s
+        # ("redis.exceptions.TimeoutError: Timeout reading from ..."). The dict
+        # form works with every redis-py version.
+        "CONFIG": {"hosts": [{"address": REDIS_URL, "socket_timeout": 10}]},
     }
 }
 TOKENGUARD = {..., "METRICS": True, "LIVE_RULES": True}

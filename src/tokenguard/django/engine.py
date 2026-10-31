@@ -35,6 +35,7 @@ from tokenguard.django.conf import (
 )
 from tokenguard.django.keys import KeyFunc
 from tokenguard.errors import RedisUnavailableError
+from tokenguard.identity import bound_identity
 
 logger = logging.getLogger("tokenguard")
 
@@ -352,7 +353,8 @@ def _enforce(request: Any, rule: Rule) -> Outcome:
     check_fail_mode(fail_mode)
 
     cost = rule.cost_for(request)
-    identity = rule.key(request)
+    max_key = get_setting("MAX_KEY_LENGTH")
+    identity = bound_identity(rule.key(request), max_key)
     if _never_fits(rule, cost):
         # Decided locally: it can never fit, so it is rejected even if Redis is down.
         _record(rule, identity, False, cost)
@@ -369,7 +371,9 @@ def _enforce(request: Any, rule: Rule) -> Outcome:
             Limit(rule.capacity, rule.refill_rate),
         )
     else:
-        owner = rule.budget_key(request) if rule.budget_key else identity
+        owner = identity
+        if rule.budget_key:
+            owner = bound_identity(rule.budget_key(request), max_key)
         budget_identity = f"{rule.scope}:{owner}"
         bucket = BudgetedBucket(
             get_client(),

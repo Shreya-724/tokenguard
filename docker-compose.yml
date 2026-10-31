@@ -1,10 +1,64 @@
+# docker compose up --build      Django (8000), Redis (6379), dashboard (8080)
+# docker compose up -d redis     only Redis, for running the code from your venv
+#
+# Demo only: the staff password below is public. See docs/docker.md.
+name: tokenguard
+
 services:
   redis:
-    image: redis:7
+    image: redis:7-alpine
+    # A memory ceiling, and eviction of keys that have a TTL (every limiter and
+    # metrics key does; the live-rules hash has none, so it is never evicted).
+    # See "Security considerations" in the README before changing these.
+    command: ["redis-server", "--maxmemory", "256mb", "--maxmemory-policy", "volatile-lru"]
     ports:
       - "6379:6379"
+    volumes:
+      - redis-data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
-      retries: 5
+      retries: 10
+
+  web:
+    build: .
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      DJANGO_SUPERUSER_USERNAME: admin
+      DJANGO_SUPERUSER_PASSWORD: admin
+      DJANGO_SUPERUSER_EMAIL: admin@example.com
+    ports:
+      - "8000:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/health/')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
+  # Publishes one stats snapshot per second for the dashboard's live feed. Without
+  # it the dashboard connects but shows STALE ("is tokenguard_feed running?").
+  feed:
+    build: .
+    entrypoint: ["python", "demo/manage.py", "tokenguard_feed"]
+    environment:
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  dashboard:
+    build: ./dashboard
+    ports:
+      - "8080:80"
+    depends_on:
+      web:
+        condition: service_healthy
+
+volumes:
+  redis-data:

@@ -77,6 +77,30 @@ def api_key(request, header: str = "HTTP_X_API_KEY") -> str:
     return "apikey:" + hashlib.sha256(raw.encode()).hexdigest()[:32]
 
 
+def api_key_if(
+    is_valid: Callable[[str], bool], header: str = "HTTP_X_API_KEY"
+) -> KeyFunc:
+    """A key function that only trusts API keys you recognise.
+
+        key=api_key_if(lambda raw: ApiKey.objects.filter(hash=sha(raw)).exists())
+
+    A recognised key gets its own bucket (stored hashed). A missing or unknown
+    one is limited by IP address instead. With plain `api_key`, a client who
+    sends a different made-up key on every request gets a fresh bucket each time
+    and is never limited; here, made-up keys all land in the sender's IP bucket.
+
+    `is_valid` runs on every request, so keep it cheap (a cache or a set lookup).
+    """
+
+    def key(request) -> str:
+        raw = request.META.get(header)
+        if raw and is_valid(raw):
+            return "apikey:" + hashlib.sha256(raw.encode()).hexdigest()[:32]
+        return ip(request)
+
+    return key
+
+
 def endpoint(request) -> str:
     """The URL pattern (e.g. /items/<int:pk>/), not the raw path.
 

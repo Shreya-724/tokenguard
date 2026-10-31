@@ -10,6 +10,7 @@ from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 
 from tokenguard.algorithms import algorithm_names
+from tokenguard.identity import DEFAULT_MAX_KEY_LENGTH, MIN_MAX_KEY_LENGTH
 from tokenguard.metrics import (
     DEFAULT_MAX_CONSUMERS,
     DEFAULT_RETENTION,
@@ -35,6 +36,7 @@ DEFAULTS: dict[str, Any] = {
     "METRICS_RETENTION": DEFAULT_RETENTION,  # seconds of history kept
     "METRICS_MAX_CONSUMERS": DEFAULT_MAX_CONSUMERS,  # per minute, per ranking
     "METRICS_FLUSH_INTERVAL": 0.0,  # >0: write metrics in batches, off the request
+    "MAX_KEY_LENGTH": DEFAULT_MAX_KEY_LENGTH,  # longer identities are hashed
     "ON_NEAR_LIMIT": None,  # callable(event) or dotted path, for budget alerts
 }
 
@@ -48,6 +50,8 @@ def get_setting(name: str) -> Any:
         check_fail_mode(value)
     elif name == "ALGORITHM":
         check_algorithm(value)
+    elif name == "MAX_KEY_LENGTH":
+        check_max_key_length(value)
     return value
 
 
@@ -55,6 +59,15 @@ def check_fail_mode(value: Any) -> None:
     if value not in FAIL_MODES:
         raise ImproperlyConfigured(
             f"TOKENGUARD fail mode must be one of {FAIL_MODES}, got {value!r}"
+        )
+
+
+def check_max_key_length(value: Any) -> None:
+    ok = isinstance(value, int) and not isinstance(value, bool)
+    if not ok or value < MIN_MAX_KEY_LENGTH:
+        raise ImproperlyConfigured(
+            f"TOKENGUARD MAX_KEY_LENGTH must be an integer >= {MIN_MAX_KEY_LENGTH}, "
+            f"got {value!r}"
         )
 
 
