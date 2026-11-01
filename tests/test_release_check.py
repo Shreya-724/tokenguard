@@ -1,167 +1,261 @@
-"""The release checks: metadata, wheel contents, name lookup, username swap."""
+"""Checks to run before publishing (Week 8). Four subcommands:
 
-import io
+    python scripts/release_check.py metadata [--release]
+        pyproject.toml, LICENSE, version agreement, the typing marker. Offline.
+        --release also fails on the <your-username> placeholder in the URLs.
+    python scripts/release_check.py name
+        Is the install name still free on PyPI (or yours)? Needs the internet.
+    python scripts/release_check.py wheel dist/<name>.whl
+        What is inside the built wheel, and what it says about itself.
+    python scripts/release_check.py install dist/<name>.whl
+        Install the wheel into a brand new virtualenv (with and without extras)
+        and use it. Needs the internet for dependencies. Uses REDIS_URL if set.
+
+Build first with:  python -m build
+Exit status is 0 when every check passes, 1 otherwise.
+"""
+
+import argparse
 import json
 import re
-import shutil
+import subprocess
 import sys
+import tempfile
 import urllib.error
+import urllib.request
+import venv
 import zipfile
+from email.parser import Parser
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
-import release_check as rc  # noqa: E402
-import set_github_user as sgu  # noqa: E402
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10
+    import tomli as tomllib
+
 
 ROOT = Path(__file__).resolve().parent.parent
+PLACEHOLDER = "<your-username>"
+VERSION = re.compile(r"^\d+(\.\d+)*((a|b|rc)\d+)?(\.post\d+)?(\.dev\d+)?$")
+REQUIRED_EXTRAS = {"django", "drf", "dashboard"}
 
 
-def copy_project(dst):
-    """A small copy of the project, with the username placeholder put back.
+def load_pyproject(root):
+    with open(Path(root) / "pyproject.toml", "rb") as handle:
+        return tomllib.load(handle)
 
-    The real files stop containing the placeholder once the author has run
-    set_github_user.py, so the tests must not depend on that.
-    """
-    for name in ("pyproject.toml", "README.md", "LICENSE", "CHANGELOG.md"):
-        text = (ROOT / name).read_text("utf-8")
-        text = re.sub(
-            r"github\.com/(?:<your-username>|[A-Za-z0-9-]+)/tokenguard",
-            "github.com/<your-username>/tokenguard",
-            text,
+
+def init_version(root):
+    text = (Path(root) / "src" / "tokenguard" / "__init__.py").read_text("utf-8")
+    match = re.search(r'^__version__ = "([^"]+)"', text, re.MULTILINE)
+    return match.group(1) if match else None
+
+
+def check_metadata(root=ROOT, release=False):
+    """A list of problems with the package metadata (empty = fine)."""
+    root = Path(root)
+    problems = []
+    project = load_pyproject(root).get("project", {})
+    for field in ("name", "version", "description", "readme", "requires-python"):
+        if not project.get(field):
+            problems.append(f"pyproject.toml: [project] {field} is missing")
+    if not project.get("authors"):
+        problems.append("pyproject.toml: [project] authors is missing")
+    if not project.get("license"):
+        problems.append("pyproject.toml: [project] license is missing")
+    if not (root / "LICENSE").is_file():
+        problems.append("LICENSE file is missing")
+    if not (root / str(project.get("readme", "README.md"))).is_file():
+        problems.append("the readme file named in pyproject.toml does not exist")
+    if not (root / "src" / "tokenguard" / "py.typed").is_file():
+        problems.append(
+            "src/tokenguard/py.typed is missing (the 'Typing :: Typed' claim)"
         )
-        (dst / name).write_text(text, "utf-8")
-    (dst / "docs").mkdir()
-    pkg = dst / "src" / "tokenguard"
-    pkg.mkdir(parents=True)
-    shutil.copy(ROOT / "src/tokenguard/__init__.py", pkg / "__init__.py")
-    (pkg / "py.typed").write_text("")
-    (pkg / "x.lua").write_text("return 1")
-    return dst
+    classifiers = project.get("classifiers", [])
+    if not classifiers:
+        problems.append("pyproject.toml: no classifiers")
+    if any(c.startswith("License ::") for c in classifiers):
+        problems.append("remove the 'License ::' classifier: `license` already says it")
+    if "Typing :: Typed" not in classifiers:
+        problems.append("add the 'Typing :: Typed' classifier (py.typed exists)")
+    version = project.get("version", "")
+    if not VERSION.match(version):
+        problems.append(f"version {version!r} is not a valid PEP 440 version")
+    if init_version(root) != version:
+        problems.append(
+            f"__version__ ({init_version(root)}) differs from pyproject ({version})"
+        )
+    changelog = (root / "CHANGELOG.md").read_text("utf-8")
+    if f"## {version}" not in changelog:
+        problems.append(f"CHANGELOG.md has no '## {version}' entry")
+    extras = set(project.get("optional-dependencies", {}))
+    if not REQUIRED_EXTRAS <= extras:
+        problems.append(f"missing extras: {sorted(REQUIRED_EXTRAS - extras)}")
+    if not project.get("dependencies"):
+        problems.append("pyproject.toml: no dependencies (redis is required)")
+    urls = project.get("urls", {})
+    if not urls:
+        problems.append("pyproject.toml: no [project.urls]")
+    if release:
+        for name, url in urls.items():
+            if PLACEHOLDER in url:
+                problems.append(f"[project.urls] {name} still has {PLACEHOLDER}")
+        if PLACEHOLDER in (root / "README.md").read_text("utf-8"):
+            problems.append(f"README.md still has {PLACEHOLDER}")
+    return problems
 
 
-def build_wheel(
-    path, root, drop=(), extra=(), name="tokenguard-ratelimit", version=None
-):
-    project = rc.load_pyproject(root)["project"]
-    version = version or project["version"]
-    files = {
-        "tokenguard/__init__.py": "",
-        "tokenguard/py.typed": "",
-        "tokenguard/x.lua": "return 1",
-        "tokenguard/django/__init__.py": "",
-        f"tokenguard_ratelimit-{version}.dist-info/licenses/LICENSE": "MIT",
-        f"tokenguard_ratelimit-{version}.dist-info/METADATA": (
-            "Metadata-Version: 2.4\n"
-            f"Name: {name}\nVersion: {version}\nLicense-Expression: MIT\n"
-            "Requires-Dist: redis>=5.0\n"
-            "Provides-Extra: django\nProvides-Extra: drf\nProvides-Extra: dashboard\n"
-        ),
-    }
-    for item in drop:
-        files.pop(item, None)
-    for item in extra:
-        files[item] = ""
-    with zipfile.ZipFile(path, "w") as wheel:
-        for filename, content in files.items():
-            wheel.writestr(filename, content)
-    return path
+def check_wheel(path, root=ROOT):
+    """A list of problems with a built wheel (empty = fine)."""
+    root = Path(root)
+    problems = []
+    with zipfile.ZipFile(path) as wheel:
+        names = set(wheel.namelist())
+        metadata_name = next(
+            (n for n in names if n.endswith(".dist-info/METADATA")), None
+        )
+        if metadata_name is None:
+            return [f"{path}: no METADATA inside the wheel"]
+        metadata = Parser().parsestr(wheel.read(metadata_name).decode("utf-8"))
+    for needed in ("tokenguard/__init__.py", "tokenguard/py.typed"):
+        if needed not in names:
+            problems.append(f"missing from the wheel: {needed}")
+    for lua in sorted((root / "src" / "tokenguard").glob("*.lua")):
+        if f"tokenguard/{lua.name}" not in names:
+            problems.append(f"missing from the wheel: tokenguard/{lua.name}")
+    if not any(n.startswith("tokenguard/django/") for n in names):
+        problems.append("the tokenguard/django package is not in the wheel")
+    for unwanted in ("tests/", "demo/", "dashboard/", "benchmarks/", "docs/"):
+        if any(n.startswith(unwanted) for n in names):
+            problems.append(f"the wheel contains {unwanted} (it should not)")
+    expected = load_pyproject(root)["project"]
+    if (
+        metadata["Name"]
+        and metadata["Name"].lower().replace("_", "-") != expected["name"]
+    ):
+        problems.append(f"wheel Name {metadata['Name']!r} != {expected['name']!r}")
+    if metadata["Version"] != expected["version"]:
+        problems.append(f"wheel Version {metadata['Version']} != {expected['version']}")
+    requires = metadata.get_all("Requires-Dist") or []
+    if not any(r.lower().startswith("redis") and "extra ==" not in r for r in requires):
+        problems.append("the wheel does not require redis")
+    provided = set(metadata.get_all("Provides-Extra") or [])
+    if not REQUIRED_EXTRAS <= provided:
+        problems.append(f"the wheel lacks extras {sorted(REQUIRED_EXTRAS - provided)}")
+    if not (metadata.get("License-Expression") or metadata.get("License")):
+        problems.append("the wheel metadata names no license")
+    if not any(n.endswith("licenses/LICENSE") or n.endswith("/LICENSE") for n in names):
+        problems.append("the LICENSE file is not inside the wheel")
+    return problems
 
 
-def test_real_project_metadata_is_fine():
-    assert rc.check_metadata(ROOT) == []
+def check_name(name, fetch=None):
+    """('free' | 'taken' | 'error', detail) for a name on PyPI."""
+    url = f"https://pypi.org/pypi/{name}/json"
+    try:
+        with (fetch or urllib.request.urlopen)(url, timeout=15) as response:
+            info = json.load(response)["info"]
+        return (
+            "taken",
+            f"{info.get('name')} {info.get('version')}: {info.get('summary')}",
+        )
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return "free", f"{name} is not registered on PyPI"
+        return "error", f"PyPI answered HTTP {exc.code}"
+    except OSError as exc:
+        return "error", f"could not reach PyPI: {exc}"
 
 
-def test_placeholder_is_only_an_error_for_a_release(tmp_path):
-    root = copy_project(tmp_path)
-    text = (root / "pyproject.toml").read_text("utf-8")
-    assert rc.PLACEHOLDER in text
-    assert rc.check_metadata(root) == []
-    assert any(rc.PLACEHOLDER in p for p in rc.check_metadata(root, release=True))
+SMOKE = """
+import tokenguard
+from tokenguard import Limit, get_algorithm, algorithm_names
+print("version", tokenguard.__version__)
+assert algorithm_names() == ("token_bucket", "fixed_window", "sliding_window")
+import os, redis
+url = os.environ.get("REDIS_URL")
+if url:
+    client = redis.Redis.from_url(url, decode_responses=True)
+    client.ping()
+    for name in algorithm_names():
+        algo = get_algorithm(name, client, key_prefix="relcheck:")
+        rule = Limit(capacity=2, refill_rate=0.001)
+        got = [algo.check("k", 1, rule).allowed for _ in range(3)]
+        assert got == [True, True, False], (name, got)
+    for key in client.scan_iter("relcheck:*"):
+        client.delete(key)
+    print("limiter works against Redis")
+else:
+    print("REDIS_URL not set: imported, but did not talk to Redis")
+"""
 
 
-def test_version_mismatch_is_caught(tmp_path):
-    root = copy_project(tmp_path)
-    init = root / "src/tokenguard/__init__.py"
-    init.write_text(
-        init.read_text("utf-8").replace('__version__ = "', '__version__ = "9.')
-    )
-    assert any("differs" in p for p in rc.check_metadata(root))
+def run(command, **kwargs):
+    print("  $", " ".join(str(c) for c in command))
+    return subprocess.run(command, check=False, **kwargs).returncode == 0
 
 
-def test_missing_files_are_caught(tmp_path):
-    root = copy_project(tmp_path)
-    (root / "LICENSE").unlink()
-    (root / "src/tokenguard/py.typed").unlink()
-    problems = " ".join(rc.check_metadata(root))
-    assert "LICENSE" in problems and "py.typed" in problems
+def check_install(wheel):
+    """Install the wheel into a fresh virtualenv and use it. True when it works."""
+    wheel = Path(wheel).resolve()
+    with tempfile.TemporaryDirectory() as tmp:
+        env_dir = Path(tmp) / "venv"
+        venv.EnvBuilder(with_pip=True).create(env_dir)
+        python = env_dir / ("Scripts" if sys.platform == "win32" else "bin") / "python"
+        ok = run([python, "-m", "pip", "install", "--quiet", str(wheel)])
+        ok = ok and run([python, "-c", SMOKE], cwd=tmp)  # cwd: not the repo, so no src/
+        extra = f"{wheel}[django,drf]"
+        ok = ok and run([python, "-m", "pip", "install", "--quiet", extra])
+        ok = ok and run(
+            [
+                python,
+                "-c",
+                "import django, rest_framework; "
+                "from tokenguard.django import rate_limit; print('django extras ok')",
+            ],
+            cwd=tmp,
+        )
+        return ok
 
 
-def test_changelog_needs_the_version(tmp_path):
-    root = copy_project(tmp_path)
-    (root / "CHANGELOG.md").write_text("# Changelog\n")
-    assert any("CHANGELOG" in p for p in rc.check_metadata(root))
+def report(problems, ok_text):
+    if problems:
+        print("PROBLEMS:")
+        for problem in problems:
+            print("  -", problem)
+        return 1
+    print(ok_text)
+    return 0
 
 
-def test_good_wheel_passes(tmp_path):
-    root = copy_project(tmp_path)
-    wheel = build_wheel(tmp_path / "ok.whl", root)
-    assert rc.check_wheel(wheel, root) == []
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    sub = parser.add_subparsers(dest="command", required=True)
+    meta = sub.add_parser("metadata")
+    meta.add_argument("--release", action="store_true")
+    sub.add_parser("name")
+    for command in ("wheel", "install"):
+        sub.add_parser(command).add_argument("path")
+    args = parser.parse_args(argv)
+
+    if args.command == "metadata":
+        return report(check_metadata(ROOT, args.release), "metadata looks right")
+    if args.command == "name":
+        name = load_pyproject(ROOT)["project"]["name"]
+        status, detail = check_name(name)
+        print(f"{name}: {status}. {detail}")
+        if status == "taken":
+            print(
+                "If this is YOUR earlier upload, that is fine. "
+                "Otherwise pick another name."
+            )
+        return 0 if status == "free" else 1
+    if args.command == "wheel":
+        return report(check_wheel(args.path), f"{args.path} looks right")
+    ok = check_install(args.path)
+    print("install check passed" if ok else "INSTALL CHECK FAILED")
+    return 0 if ok else 1
 
 
-def test_wheel_missing_lua_and_py_typed(tmp_path):
-    root = copy_project(tmp_path)
-    wheel = build_wheel(
-        tmp_path / "bad.whl", root, drop=("tokenguard/x.lua", "tokenguard/py.typed")
-    )
-    problems = " ".join(rc.check_wheel(wheel, root))
-    assert "x.lua" in problems and "py.typed" in problems
-
-
-def test_wheel_with_tests_and_wrong_name(tmp_path):
-    root = copy_project(tmp_path)
-    wheel = build_wheel(
-        tmp_path / "bad.whl", root, extra=("tests/test_a.py",), name="tokenguard"
-    )
-    problems = " ".join(rc.check_wheel(wheel, root))
-    assert "tests/" in problems and "Name" in problems
-
-
-def test_wheel_wrong_version(tmp_path):
-    root = copy_project(tmp_path)
-    wheel = build_wheel(tmp_path / "v.whl", root, version="0.0.1")
-    assert any("Version" in p for p in rc.check_wheel(wheel, root))
-
-
-class FakeResponse(io.BytesIO):
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return False
-
-
-def test_name_taken_free_and_error():
-    body = json.dumps({"info": {"name": "x", "version": "1", "summary": "s"}}).encode()
-    assert (
-        rc.check_name("x", fetch=lambda url, timeout: FakeResponse(body))[0] == "taken"
-    )
-
-    def missing(url, timeout):
-        raise urllib.error.HTTPError(url, 404, "nf", {}, None)
-
-    def broken(url, timeout):
-        raise OSError("offline")
-
-    assert rc.check_name("x", fetch=missing)[0] == "free"
-    assert rc.check_name("x", fetch=broken)[0] == "error"
-
-
-def test_set_github_user_replaces_and_is_repeatable(tmp_path):
-    root = copy_project(tmp_path)
-    (root / "docs" / "a.md").write_text(f"see {sgu.PLACEHOLDER}/x")
-    changed = sgu.replace_in(root, "octocat")
-    assert len(changed) >= 2
-    assert sgu.PLACEHOLDER not in (root / "README.md").read_text("utf-8")
-    assert "octocat" in (root / "docs" / "a.md").read_text("utf-8")
-    assert sgu.replace_in(root, "octocat") == []
-    assert rc.check_metadata(root, release=True) == []
+if __name__ == "__main__":
+    sys.exit(main())
