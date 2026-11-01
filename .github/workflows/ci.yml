@@ -67,6 +67,66 @@ jobs:
         if: failure()
         run: cat server.log
 
+  django-versions:
+    # Backs the "Framework :: Django :: 4.2 / 5.2" classifiers in pyproject.toml.
+    # If 4.2 fails and you do not want to fix it, delete that classifier.
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+    env:
+      REDIS_URL: redis://localhost:6379/0
+    strategy:
+      matrix:
+        django: ["4.2", "5.2"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -e ".[dev,bench]" "Django~=${{ matrix.django }}.0"
+      - run: python -c "import django; print(django.get_version())"
+      - run: python demo/manage.py check
+      - run: pytest --ignore=tests/test_algorithms_concurrency.py -q
+
+  package:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build twine
+      - run: python scripts/release_check.py metadata
+      - run: python -m build
+      - run: twine check dist/*
+      - run: python scripts/release_check.py wheel dist/*.whl
+      - name: Install the built wheel into a fresh virtualenv and use it
+        run: python scripts/release_check.py install dist/*.whl
+        env:
+          REDIS_URL: redis://localhost:6379/5
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
   dashboard:
     runs-on: ubuntu-latest
     defaults:

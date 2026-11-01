@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+Packaging.
+
+- Installs as `tokenguard-ratelimit` (imports as `tokenguard`). MIT license.
+- Wheel and sdist metadata: classifiers, URLs, `py.typed`, extras `django`, `drf`,
+  `dashboard`, `bench`, `dev`.
+- `scripts/release_check.py` checks metadata, wheel contents and a clean install;
+  `scripts/set_github_user.py` fills in the repository URLs. See `docs/releasing.md`.
+- CI builds the package, installs the wheel in a fresh virtualenv, and tests against
+  Django 4.2 and 5.2.
+
 ## 0.6.0
 
 Proof, performance and hardening.

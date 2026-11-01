@@ -1,6 +1,6 @@
 # tokenguard
 
-![CI](https://github.com/<your-username>/tokenguard/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/Shreya-724/tokenguard/actions/workflows/ci.yml/badge.svg)
 
 A **token-aware, Redis-backed rate limiter for Django**, built for LLM APIs.
 Limit clients by *how much they consume*, not just how often they call, with
@@ -72,7 +72,8 @@ docker compose up -d
 **2. Install**
 
 ```bash
-pip install "tokenguard[django]"      # add [drf] for Django REST Framework
+pip install "tokenguard-ratelimit[django]"   # add [drf] for Django REST Framework
+                                          # (installs as tokenguard-ratelimit, imports as tokenguard)
 ```
 
 **3. Configure Django** (`settings.py`)
@@ -554,7 +555,7 @@ The dashboard and its traffic generator are covered in [docs/dashboard.md](docs/
 and [docs/demo-script.md](docs/demo-script.md) (a 60-second walkthrough).
 
 ```bash
-git clone https://github.com/<your-username>/tokenguard && cd tokenguard
+git clone https://github.com/Shreya-724/tokenguard && cd tokenguard
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 docker compose up -d
