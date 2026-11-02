@@ -1,15 +1,16 @@
 # tokenguard
 
-![CI](https://github.com/Shreya-724/tokenguard/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/<your-username>/tokenguard/actions/workflows/ci.yml/badge.svg)
 
 A **token-aware, Redis-backed rate limiter for Django**, built for LLM APIs.
 Limit clients by *how much they consume*, not just how often they call, with
 atomic correctness under concurrency.
 
-> **Status: work in progress (v0.6.0).** The core limiter, Redis/Lua backend, Django
+> **Status: v1.0.0.** The core limiter, Redis/Lua backend, Django
 > integration, token-aware LLM limiting with budgets, three algorithms, live rule
 > changes, metrics, a live React dashboard, load tests and a security review are done.
-> Packaging and the PyPI release are next (see [Roadmap](#roadmap)).
+> Install it from PyPI as `tokenguard-ratelimit`; the README and docs are still being
+> polished (see [Roadmap](#roadmap)).
 
 <!-- After recording (see docs/demo-script.md), save the GIF as docs/demo.gif and
      remove the comment markers around the image line to show it:
@@ -555,7 +556,7 @@ The dashboard and its traffic generator are covered in [docs/dashboard.md](docs/
 and [docs/demo-script.md](docs/demo-script.md) (a 60-second walkthrough).
 
 ```bash
-git clone https://github.com/Shreya-724/tokenguard && cd tokenguard
+git clone https://github.com/<your-username>/tokenguard && cd tokenguard
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 docker compose up -d

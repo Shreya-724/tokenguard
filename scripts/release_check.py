@@ -11,6 +11,12 @@
         Install the wheel into a brand new virtualenv (with and without extras)
         and use it. Needs the internet for dependencies. Uses REDIS_URL if set.
 
+    python scripts/release_check.py tag v1.0.0
+        Does the git tag match the version in pyproject.toml? (CI runs this.)
+    python scripts/release_check.py index testpypi|pypi [VERSION]
+        After uploading: install the package FROM the index into a fresh
+        virtualenv and use it. VERSION defaults to the one in pyproject.toml.
+
 Build first with:  python -m build
 Exit status is 0 when every check passes, 1 otherwise.
 """
@@ -28,7 +34,11 @@ import zipfile
 from email.parser import Parser
 from pathlib import Path
 
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10
+    import tomli as tomllib
+
 
 ROOT = Path(__file__).resolve().parent.parent
 PLACEHOLDER = "<your-username>"
@@ -214,6 +224,50 @@ def check_install(wheel):
         return ok
 
 
+INDEXES = {
+    "testpypi": [
+        "--index-url",
+        "https://test.pypi.org/simple/",
+        "--extra-index-url",
+        "https://pypi.org/simple/",
+    ],
+    "pypi": [],
+}
+
+
+def check_tag(tag, root=ROOT):
+    """Problems if a release tag does not match the package version."""
+    version = load_pyproject(root)["project"]["version"]
+    if tag.removeprefix("refs/tags/") != f"v{version}":
+        return [f"tag {tag!r} does not match version {version} (expected v{version})"]
+    return []
+
+
+def check_index(index, version, root=ROOT, attempts=6, wait=10):
+    """Install name==version from an index into a fresh virtualenv and use it.
+
+    A fresh upload can take a short while to appear, so the install is retried.
+    """
+    import time
+
+    name = load_pyproject(root)["project"]["name"]
+    with tempfile.TemporaryDirectory() as tmp:
+        env_dir = Path(tmp) / "venv"
+        venv.EnvBuilder(with_pip=True).create(env_dir)
+        python = env_dir / ("Scripts" if sys.platform == "win32" else "bin") / "python"
+        spec = f"{name}[django,drf]=={version}"
+        command = [python, "-m", "pip", "install", "--quiet", "--no-cache-dir"]
+        command += INDEXES[index] + [spec]
+        for attempt in range(1, attempts + 1):
+            if run(command):
+                break
+            if attempt == attempts:
+                return False
+            print(f"  not there yet, retrying in {wait}s ({attempt}/{attempts})")
+            time.sleep(wait)
+        return run([python, "-c", SMOKE], cwd=tmp)
+
+
 def report(problems, ok_text):
     if problems:
         print("PROBLEMS:")
@@ -230,6 +284,10 @@ def main(argv=None):
     meta = sub.add_parser("metadata")
     meta.add_argument("--release", action="store_true")
     sub.add_parser("name")
+    sub.add_parser("tag").add_argument("tag")
+    idx = sub.add_parser("index")
+    idx.add_argument("index", choices=sorted(INDEXES))
+    idx.add_argument("version", nargs="?")
     for command in ("wheel", "install"):
         sub.add_parser(command).add_argument("path")
     args = parser.parse_args(argv)
@@ -246,6 +304,13 @@ def main(argv=None):
                 "Otherwise pick another name."
             )
         return 0 if status == "free" else 1
+    if args.command == "tag":
+        return report(check_tag(args.tag), f"{args.tag} matches the version")
+    if args.command == "index":
+        version = args.version or load_pyproject(ROOT)["project"]["version"]
+        ok = check_index(args.index, version)
+        print(f"{args.index} install passed" if ok else "INSTALL FROM INDEX FAILED")
+        return 0 if ok else 1
     if args.command == "wheel":
         return report(check_wheel(args.path), f"{args.path} looks right")
     ok = check_install(args.path)

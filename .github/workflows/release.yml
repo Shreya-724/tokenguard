@@ -1,0 +1,60 @@
+name: Release
+# Push a tag like v1.0.0 to publish to PyPI. Run it by hand (Actions tab ->
+# Release -> Run workflow) to publish to TestPyPI instead. Both use PyPI "trusted
+# publishing", so no password or token is stored in GitHub. One-time setup is in
+# docs/releasing.md.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build twine tomli
+      - name: The tag must match the version in pyproject.toml
+        if: startsWith(github.ref, 'refs/tags/')
+        run: python scripts/release_check.py tag "$GITHUB_REF"
+      - run: python scripts/release_check.py metadata --release
+      - run: python -m build
+      - run: twine check dist/*
+      - run: python scripts/release_check.py wheel dist/*.whl
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  testpypi:
+    if: github.event_name == 'workflow_dispatch'
+    needs: build
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  pypi:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
