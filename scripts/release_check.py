@@ -9,7 +9,8 @@
         What is inside the built wheel, and what it says about itself.
     python scripts/release_check.py install dist/<name>.whl
         Install the wheel into a brand new virtualenv (with and without extras)
-        and use it. Needs the internet for dependencies. Uses REDIS_URL if set.
+        and use it, then run the README quick start in a new Django project.
+        Needs the internet for dependencies. Uses REDIS_URL if set (use db 5).
 
     python scripts/release_check.py tag v1.0.0
         Does the git tag match the version in pyproject.toml? (CI runs this.)
@@ -23,6 +24,7 @@ Exit status is 0 when every check passes, 1 otherwise.
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -221,6 +223,20 @@ def check_install(wheel):
             ],
             cwd=tmp,
         )
+        redis_url = os.environ.get("REDIS_URL")
+        if ok and redis_url:
+            print("  the README quick start, in a brand new Django project:")
+            ok = run(
+                [
+                    python,
+                    ROOT / "scripts" / "quickstart_check.py",
+                    "--redis",
+                    redis_url,
+                ],
+                cwd=tmp,
+            )
+        elif ok:
+            print("  REDIS_URL not set: skipped the quick start check")
         return ok
 
 

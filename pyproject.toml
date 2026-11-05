@@ -44,10 +44,10 @@ classifiers = [
 dependencies = ["redis>=5.0"]
 
 [project.urls]
-Homepage = "https://github.com/<your-username>/tokenguard"
-Source = "https://github.com/<your-username>/tokenguard"
-Issues = "https://github.com/<your-username>/tokenguard/issues"
-Changelog = "https://github.com/<your-username>/tokenguard/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/Shreya-724/tokenguard"
+Source = "https://github.com/Shreya-724/tokenguard"
+Issues = "https://github.com/Shreya-724/tokenguard/issues"
+Changelog = "https://github.com/Shreya-724/tokenguard/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 django = ["django>=4.2"]

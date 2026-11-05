@@ -14,6 +14,19 @@ it will wait for 2.0.
 - CI builds the package, installs the wheel in a fresh virtualenv, and tests against
   Django 4.2 and 5.2.
 
+### Documentation
+
+- A quick start that begins in an empty folder: new Django project, install from PyPI,
+  one decorated view, and the expected `200 200 200 200 200 429 429`.
+  `scripts/quickstart_check.py` runs those exact steps, and `release_check.py install`
+  runs it inside the fresh virtualenv it builds.
+- `docs/configuration.md` (every setting, rule field, key function and header),
+  `docs/examples.md` (twelve recipes) and `docs/race-condition.md`.
+- `scripts/race_demo.py` reproduces the check-then-act race: the naive limiter lets
+  through several times the limit, every Lua algorithm exactly the limit.
+- `tests/test_docs.py` fails if a setting is missing from the README or the reference,
+  or an example stops being valid Python.
+
 ## 0.6.0
 
 Proof, performance and hardening.

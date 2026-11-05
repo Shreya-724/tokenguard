@@ -1,16 +1,14 @@
 # tokenguard
 
-![CI](https://github.com/<your-username>/tokenguard/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/Shreya-724/tokenguard/actions/workflows/ci.yml/badge.svg)
 
 A **token-aware, Redis-backed rate limiter for Django**, built for LLM APIs.
 Limit clients by *how much they consume*, not just how often they call, with
 atomic correctness under concurrency.
 
-> **Status: v1.0.0.** The core limiter, Redis/Lua backend, Django
-> integration, token-aware LLM limiting with budgets, three algorithms, live rule
-> changes, metrics, a live React dashboard, load tests and a security review are done.
-> Install it from PyPI as `tokenguard-ratelimit`; the README and docs are still being
-> polished (see [Roadmap](#roadmap)).
+> **Status: v1.0.** Token-aware limiting for LLM APIs, three algorithms, budgets, live
+> rule changes, metrics and a live dashboard, with a load-test and security review.
+> Tested against Redis 7, Django 4.2 and 5.2, Python 3.10 to 3.12.
 
 <!-- After recording (see docs/demo-script.md), save the GIF as docs/demo.gif and
      remove the comment markers around the image line to show it:
@@ -47,7 +45,104 @@ rate, so short bursts are fine while the long-run average stays capped.
 - **Live dashboard** (React + Recharts over a WebSocket): traffic chart, top consumers,
   bucket gauge, and a rule editor that shows the before/after of a change
 
-## Run everything with one command
+## Quick start (5 minutes)
+
+You need Python 3.10+ and Docker (or any Redis you can reach). This starts from an
+empty folder; nothing here needs a clone of this repository.
+
+**1. Run Redis**
+
+```bash
+docker run -d --name redis -p 6379:6379 redis:7-alpine
+```
+
+**2. Create a Django project and install tokenguard**
+
+```bash
+python -m venv .venv
+source .venv/bin/activate            # Windows PowerShell: .venv\Scripts\Activate.ps1
+pip install "tokenguard-ratelimit[django]"   # installs as tokenguard-ratelimit, imports as tokenguard
+django-admin startproject mysite
+cd mysite
+```
+
+**3. Turn it on** (`mysite/settings.py`)
+
+```python
+MIDDLEWARE = [
+    # ...the lines Django already put here, then, after AuthenticationMiddleware:
+    "tokenguard.django.middleware.TokenGuardMiddleware",
+]
+
+TOKENGUARD = {
+    "REDIS_URL": "redis://localhost:6379/0",
+    "DEFAULT_RULE": {
+        "capacity": 60,
+        "refill_rate": 1,
+    },  # burst of 60, then 1 per second
+    "FAIL_MODE": "open",  # or "closed"
+}
+```
+
+Every request is now limited per user (anonymous users per IP).
+
+**4. Give one view a stricter limit** (`mysite/urls.py`)
+
+```python
+from django.http import JsonResponse
+from django.urls import path
+from tokenguard.django import rate_limit
+
+
+@rate_limit(capacity=5, refill_rate=0.1, key="ip")  # burst of 5, then one every 10 s
+def ping(request):
+    return JsonResponse({"ok": True})
+
+
+urlpatterns = [path("ping/", ping)]
+```
+
+**5. Try it**
+
+```bash
+python manage.py runserver
+```
+
+In a second terminal, send seven requests:
+
+```bash
+for i in 1 2 3 4 5 6 7; do curl -s -o /dev/null -w "%{http_code}\n" localhost:8000/ping/; done
+```
+
+```powershell
+1..7 | ForEach-Object { curl.exe -s -o NUL -w "%{http_code}`n" localhost:8000/ping/ }
+```
+
+You should see five `200`s, then `429` twice. Look at the refusal:
+
+```bash
+curl -i localhost:8000/ping/
+```
+
+```
+HTTP/1.1 429 Too Many Requests
+Retry-After: 10
+X-RateLimit-Limit: 5
+X-RateLimit-Remaining: 0
+X-RateLimit-Reset: 1760000010
+
+{"error": "rate_limited", "retry_after": 9.874}
+```
+
+Wait ten seconds and one request is allowed again. That is the whole idea: a bucket
+of 5 that refills at one token per 10 seconds.
+
+**Next:** [limit by tokens for an LLM API](#token-aware-limiting-for-llm-apis),
+[pick an algorithm](#algorithms-which-one-should-i-use),
+[all settings](docs/configuration.md), [copy-paste examples](docs/examples.md),
+[the live dashboard](#dashboard).
+
+## Try the demo and dashboard (clone the repo)
 
 ```bash
 docker compose up --build
@@ -61,66 +156,6 @@ docker compose up --build
 
 Then `python scripts/load_demo.py` (from your venv) sends traffic so the dashboard
 has something to show. Details and troubleshooting: [docs/docker.md](docs/docker.md).
-
-## Quick start (5 minutes)
-
-**1. Run Redis**
-
-```bash
-docker compose up -d
-```
-
-**2. Install**
-
-```bash
-pip install "tokenguard-ratelimit[django]"   # add [drf] for Django REST Framework
-                                          # (installs as tokenguard-ratelimit, imports as tokenguard)
-```
-
-**3. Configure Django** (`settings.py`)
-
-```python
-MIDDLEWARE = [
-    # ...
-    "django.contrib.auth.middleware.AuthenticationMiddleware",
-    "tokenguard.django.middleware.TokenGuardMiddleware",  # after authentication
-]
-
-TOKENGUARD = {
-    "REDIS_URL": "redis://localhost:6379/0",
-    "DEFAULT_RULE": {"capacity": 60, "refill_rate": 1},  # burst of 60, then 1/sec
-    "FAIL_MODE": "open",  # or "closed"
-    "KEY_PREFIX": "tg",
-}
-```
-
-Every request is now limited per user (anonymous users per IP).
-
-**4. Limit a single view**
-
-```python
-from tokenguard.django import rate_limit
-
-
-@rate_limit(capacity=20, refill_rate=0.5, key="user", cost=5)
-def generate_report(request): ...
-```
-
-**5. Try it**
-
-```bash
-curl -i localhost:8000/login/     # repeat 6 times: the 6th is a 429
-```
-
-```
-HTTP/1.1 429 Too Many Requests
-Retry-After: 10
-X-RateLimit-Limit: 5
-X-RateLimit-Remaining: 0
-X-RateLimit-Reset: 1760000010
-
-{"error": "rate_limited", "retry_after": 9.874}
-```
 
 ## Token-aware limiting for LLM APIs
 
@@ -330,6 +365,9 @@ Not measured yet. Run `python benchmarks/run_bench.py --label before` and
 
 ## Configuration reference
 
+The settings that matter most are below; the complete reference, with every rule field
+and key function, is in [docs/configuration.md](docs/configuration.md).
+
 | Setting | Default | Meaning |
 |---|---|---|
 | `REDIS_URL` | `redis://localhost:6379/0` | Redis connection URL |
@@ -500,12 +538,15 @@ My first Redis version read the bucket, calculated in Python and wrote it back. 
 concurrency, two requests could read the same token count before either wrote back,
 so both spent the same token. This is a check-then-act race.
 
-1,000 requests against a bucket with capacity 100:
+400 requests from 8 processes at once, against a bucket that holds 100 (5 rounds, Redis 7
+on localhost):
 
-| Implementation | Threads (50) | Processes (8) |
+| Implementation | Allowed per round | Over the limit |
 |---|---|---|
-| Naive (read, compute, write) | `<N>` allowed | `<N>` allowed |
-| Atomic Lua script | exactly 100, every run | exactly 100, every run |
+| Naive (read, compute, write) | 318 to 354 | 5 of 5 rounds |
+| Atomic Lua script (all three algorithms) | exactly 100 | 0 of 5 rounds |
+
+Reproduce it, and get numbers for your own machine: `python scripts/race_demo.py`.
 
 The fix moves the whole read-compute-write into one Lua script, which Redis executes
 atomically. See [docs/race-condition.md](docs/race-condition.md) for the reproduction.
@@ -556,7 +597,7 @@ The dashboard and its traffic generator are covered in [docs/dashboard.md](docs/
 and [docs/demo-script.md](docs/demo-script.md) (a 60-second walkthrough).
 
 ```bash
-git clone https://github.com/<your-username>/tokenguard && cd tokenguard
+git clone https://github.com/Shreya-724/tokenguard && cd tokenguard
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 docker compose up -d

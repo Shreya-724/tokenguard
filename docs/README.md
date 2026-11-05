@@ -2,6 +2,8 @@
 
 | Page | What it covers |
 |---|---|
+| [configuration.md](configuration.md) | Every setting, the fields of a rule, key functions and response headers |
+| [examples.md](examples.md) | Twelve copy-paste recipes: login, API keys, LLM budgets, proxies, live rules |
 | [cost-model.md](cost-model.md) | Token estimates, model weights, reconciliation, budgets, near-limit alerts, streaming |
 | [algorithms.md](algorithms.md) | Token bucket, fixed window, sliding window: comparison and which to use |
 | [algorithm-benchmarks.md](algorithm-benchmarks.md) | Measured speed and memory per key for the three algorithms, with a chart |
