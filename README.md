@@ -12,7 +12,7 @@ atomic correctness under concurrency.
 
 <!-- After recording (see docs/demo-script.md), save the GIF as docs/demo.gif and
      remove the comment markers around the image line to show it:
-![The dashboard: traffic, a client hits its limit, the rule is edited live](docs/demo.gif)
+![The dashboard: traffic, a client hits its limit, the rule is edited live](https://raw.githubusercontent.com/Shreya-724/tokenguard/main/docs/demo.gif)
 -->
 
 ## Why
@@ -139,7 +139,7 @@ of 5 that refills at one token per 10 seconds.
 
 **Next:** [limit by tokens for an LLM API](#token-aware-limiting-for-llm-apis),
 [pick an algorithm](#algorithms-which-one-should-i-use),
-[all settings](docs/configuration.md), [copy-paste examples](docs/examples.md),
+[all settings](https://github.com/Shreya-724/tokenguard/blob/main/docs/configuration.md), [copy-paste examples](https://github.com/Shreya-724/tokenguard/blob/main/docs/examples.md),
 [the live dashboard](#dashboard).
 
 ## Try the demo and dashboard (clone the repo)
@@ -155,7 +155,7 @@ docker compose up --build
 | localhost:6379 | Redis (capped at 256 MB) |
 
 Then `python scripts/load_demo.py` (from your venv) sends traffic so the dashboard
-has something to show. Details and troubleshooting: [docs/docker.md](docs/docker.md).
+has something to show. Details and troubleshooting: [docs/docker.md](https://github.com/Shreya-724/tokenguard/blob/main/docs/docker.md).
 
 ## Token-aware limiting for LLM APIs
 
@@ -197,7 +197,7 @@ unused part is refunded, an overshoot is charged. Overspend may put the bucket i
 *debt*, capped at one bucket's worth, so a single huge reply delays the next request
 but cannot lock a user out for hours. Server errors (5xx) and crashed views are
 refunded in full; client errors (4xx) stay charged. Details and every edge case:
-[docs/cost-model.md](docs/cost-model.md).
+[docs/cost-model.md](https://github.com/Shreya-724/tokenguard/blob/main/docs/cost-model.md).
 
 **4. Weights and isolation.** Each `(user, model)` pair has its own bucket, and a model
 can have a weight: with `large` at 5x, 2,000 tokens cost 10,000 bucket tokens. Heavy
@@ -288,9 +288,9 @@ tokenguard has three algorithms behind one interface. Pick one globally with
   requests in the window.
 
 Details, the boundary-burst demonstration and reproducible numbers:
-[docs/algorithms.md](docs/algorithms.md). Run `python scripts/compare_algorithms.py`
+[docs/algorithms.md](https://github.com/Shreya-724/tokenguard/blob/main/docs/algorithms.md). Run `python scripts/compare_algorithms.py`
 to measure them on your own machine. Speed and memory per key at limits from 10 to
-10,000, with a chart: [docs/algorithm-benchmarks.md](docs/algorithm-benchmarks.md).
+10,000, with a chart: [docs/algorithm-benchmarks.md](https://github.com/Shreya-724/tokenguard/blob/main/docs/algorithm-benchmarks.md).
 
 ## Live rule changes
 
@@ -315,7 +315,7 @@ python scripts/tokenguard_rules.py delete login          # back to the settings
   and an override that cannot apply is ignored.
 
 Details, what happens to existing counters, and a demo (`scripts/demo_live_rules.py`):
-[docs/live-rules.md](docs/live-rules.md).
+[docs/live-rules.md](https://github.com/Shreya-724/tokenguard/blob/main/docs/live-rules.md).
 
 ## Metrics
 
@@ -333,7 +333,7 @@ m.timeseries(seconds=300)  # per second, for a chart
 ```
 
 or `python scripts/tokenguard_stats.py top`. Details, storage layout and limits:
-[docs/metrics.md](docs/metrics.md).
+[docs/metrics.md](https://github.com/Shreya-724/tokenguard/blob/main/docs/metrics.md).
 
 ## Dashboard
 
@@ -341,13 +341,13 @@ A React dashboard (`dashboard/`) shows live traffic over the WebSocket: an
 allowed-vs-blocked chart, top consumers, per-key bucket levels, and a rule
 editor that changes limits live and shows the before/after. Run it with
 `npm install && npm run dev` in `dashboard/`, next to the Django server and
-`manage.py tokenguard_feed`. Details: [docs/dashboard.md](docs/dashboard.md).
+`manage.py tokenguard_feed`. Details: [docs/dashboard.md](https://github.com/Shreya-724/tokenguard/blob/main/docs/dashboard.md).
 
 ## Performance
 
 How much the limiter costs, measured with Locust against a real Django server
 (same views with and without the limiter), and what was done about it. How to
-reproduce: [benchmarks/README.md](benchmarks/README.md).
+reproduce: [benchmarks/README.md](https://github.com/Shreya-724/tokenguard/blob/main/benchmarks/README.md).
 
 Every allowed request makes one Redis round trip for the decision. With
 `METRICS` on and the default `METRICS_FLUSH_INTERVAL = 0` it makes a second one
@@ -366,7 +366,7 @@ Not measured yet. Run `python benchmarks/run_bench.py --label before` and
 ## Configuration reference
 
 The settings that matter most are below; the complete reference, with every rule field
-and key function, is in [docs/configuration.md](docs/configuration.md).
+and key function, is in [docs/configuration.md](https://github.com/Shreya-724/tokenguard/blob/main/docs/configuration.md).
 
 | Setting | Default | Meaning |
 |---|---|---|
@@ -477,7 +477,7 @@ own Redis.
 | **Reading or changing limits** | The rules API and dashboard are staff-only (session login with CSRF, or Basic auth), and the login endpoint is itself rate limited. | Anyone who can write to Redis can change limits and read keys: do not expose Redis (the compose file publishes 6379 for local development only), use a password and `rediss://` in production. Change the demo password `admin`/`admin`. |
 
 Two sizing numbers, both measured on the author's machine (see
-[docs/algorithm-benchmarks.md](docs/algorithm-benchmarks.md)): a token-bucket or
+[docs/algorithm-benchmarks.md](https://github.com/Shreya-724/tokenguard/blob/main/docs/algorithm-benchmarks.md)): a token-bucket or
 fixed-window key is about 120 bytes of data, and 1 million distinct active callers
 need a few hundred MB of Redis. If you key by IP behind a proxy and forget
 `TRUSTED_PROXIES`, everyone shares the proxy's address and one bucket.
@@ -549,7 +549,7 @@ on localhost):
 Reproduce it, and get numbers for your own machine: `python scripts/race_demo.py`.
 
 The fix moves the whole read-compute-write into one Lua script, which Redis executes
-atomically. See [docs/race-condition.md](docs/race-condition.md) for the reproduction.
+atomically. See [docs/race-condition.md](https://github.com/Shreya-724/tokenguard/blob/main/docs/race-condition.md) for the reproduction.
 
 ## Design decisions
 
@@ -593,8 +593,8 @@ atomically. See [docs/race-condition.md](docs/race-condition.md) for the reprodu
 
 ## Running the demo and tests
 
-The dashboard and its traffic generator are covered in [docs/dashboard.md](docs/dashboard.md)
-and [docs/demo-script.md](docs/demo-script.md) (a 60-second walkthrough).
+The dashboard and its traffic generator are covered in [docs/dashboard.md](https://github.com/Shreya-724/tokenguard/blob/main/docs/dashboard.md)
+and [docs/demo-script.md](https://github.com/Shreya-724/tokenguard/blob/main/docs/demo-script.md) (a 60-second walkthrough).
 
 ```bash
 git clone https://github.com/Shreya-724/tokenguard && cd tokenguard

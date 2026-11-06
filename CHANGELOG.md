@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.1
+
+Fix the project links shown on PyPI.
+
 ## 1.0.0
 
 First release on PyPI. The API is considered stable from here: changes that break

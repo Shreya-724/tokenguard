@@ -29,6 +29,8 @@ def copy_project(dst):
             "github.com/<your-username>/tokenguard",
             text,
         )
+        if name == "README.md":  # relative links are a metadata error
+            text = rc.absolutize_readme(text, "https://github.com/octocat/tokenguard")
         (dst / name).write_text(text, "utf-8")
     (dst / "docs").mkdir()
     pkg = dst / "src" / "tokenguard"
@@ -40,7 +42,7 @@ def copy_project(dst):
 
 
 def build_wheel(
-    path, root, drop=(), extra=(), name="tokenguard-ratelimit", version=None
+    path, root, drop=(), extra=(), name="tokenguard-ratelimit", version=None, urls=()
 ):
     project = rc.load_pyproject(root)["project"]
     version = version or project["version"]
@@ -55,6 +57,7 @@ def build_wheel(
             f"Name: {name}\nVersion: {version}\nLicense-Expression: MIT\n"
             "Requires-Dist: redis>=5.0\n"
             "Provides-Extra: django\nProvides-Extra: drf\nProvides-Extra: dashboard\n"
+            + "".join(f"Project-URL: {u}\n" for u in urls)
         ),
     }
     for item in drop:
@@ -178,3 +181,99 @@ def test_tag_must_match_the_version(tmp_path):
 
 def test_the_real_project_is_at_1_0_0():
     assert rc.load_pyproject(ROOT)["project"]["version"] == rc.init_version(ROOT)
+
+
+REPO = "https://github.com/octocat/tokenguard"
+SAMPLE = """# T
+![demo](docs/demo.gif)
+See [algorithms](docs/algorithms.md), [more](./docs/a.md#part), [bench](benchmarks/),
+[top](#install), [site](https://example.com/x), [mail](mailto:a@b.c).
+
+```python
+x = "[not a link](docs/skip.md)"
+```
+<img src="docs/pic.png"> and [license](LICENSE "the license")
+"""
+
+
+def test_relative_links_are_found_outside_code_fences():
+    assert rc.relative_links(SAMPLE) == [
+        "docs/demo.gif",
+        "docs/algorithms.md",
+        "./docs/a.md#part",
+        "benchmarks/",
+        "LICENSE",
+        "docs/pic.png",
+    ]
+
+
+def test_absolutize_rewrites_links_images_and_leaves_the_rest():
+    out = rc.absolutize_readme(SAMPLE, REPO)
+    assert (
+        "![demo](https://raw.githubusercontent.com/octocat/tokenguard/main/docs/demo.gif)"
+        in out
+    )
+    assert f"[algorithms]({REPO}/blob/main/docs/algorithms.md)" in out
+    assert f"[more]({REPO}/blob/main/docs/a.md#part)" in out
+    assert f"[bench]({REPO}/tree/main/benchmarks/)" in out
+    assert f'[license]({REPO}/blob/main/LICENSE "the license")' in out
+    assert (
+        'src="https://raw.githubusercontent.com/octocat/tokenguard/main/docs/pic.png"'
+        in out
+    )
+    assert "[top](#install)" in out and "(https://example.com/x)" in out
+    assert "[not a link](docs/skip.md)" in out  # inside a code fence
+    assert rc.relative_links(out) == []
+    assert rc.absolutize_readme(out, REPO) == out  # idempotent
+
+
+def test_metadata_fails_while_the_readme_has_relative_links(tmp_path):
+    root = copy_project(tmp_path)
+    (root / "README.md").write_text("[x](docs/a.md)\n", "utf-8")
+    assert any("relative link" in p for p in rc.check_metadata(root))
+    fixed = rc.absolutize_readme((root / "README.md").read_text("utf-8"), REPO)
+    (root / "README.md").write_text(fixed, "utf-8")
+    assert not any("relative link" in p for p in rc.check_metadata(root))
+
+
+def test_wheel_with_the_username_placeholder_is_refused(tmp_path):
+    root = copy_project(tmp_path)
+    good = build_wheel(
+        tmp_path / "good.whl",
+        root,
+        urls=("Homepage, https://github.com/octocat/tokenguard",),
+    )
+    assert rc.check_wheel(good, root) == []
+    bad = build_wheel(
+        tmp_path / "bad.whl",
+        root,
+        urls=("Homepage, https://github.com/<your-username>/tokenguard",),
+    )
+    assert any("project link" in p for p in rc.check_wheel(bad, root))
+
+
+def test_bump_version_updates_all_three_places(tmp_path):
+    import bump_version as bv
+
+    root = copy_project(tmp_path)
+    old = rc.load_pyproject(root)["project"]["version"]
+    bv.bump(root, "9.8.7", "Fixed something.")
+    assert rc.load_pyproject(root)["project"]["version"] == "9.8.7"
+    assert rc.init_version(root) == "9.8.7"
+    text = (root / "CHANGELOG.md").read_text("utf-8")
+    assert text.index("## 9.8.7") < text.index(f"## {old}")
+    assert "Fixed something." in text
+    assert rc.check_metadata(root) == []
+
+
+def test_bump_version_rejects_bad_input(tmp_path):
+    import bump_version as bv
+    import pytest
+
+    root = copy_project(tmp_path)
+    with pytest.raises(ValueError):
+        bv.bump(root, "v1.0.1", "")
+    with pytest.raises(ValueError):
+        bv.bump(
+            root, rc.load_pyproject(root)["project"]["version"], ""
+        )  # already listed

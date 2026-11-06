@@ -108,3 +108,38 @@ python -m venv $env:TEMP\final; & $env:TEMP\final\Scripts\pip install "tokenguar
 ```
 
 works from any directory and prints `1.0.0`.
+
+## Before every upload: the checklist
+
+An uploaded version can never be changed, so these run first. Each one has caught a
+real mistake.
+
+```powershell
+python scripts/set_github_user.py <username>            # no <your-username> left
+python scripts/release_check.py readme-links --write    # PyPI cannot follow docs/x.md
+python scripts/release_check.py metadata --release      # must print "metadata looks right"
+python -m build
+twine check dist/*
+python scripts/release_check.py wheel dist/<the .whl>   # also refuses placeholder links
+python scripts/release_check.py install dist/<the .whl> # needs REDIS_URL (db 5)
+```
+
+Why `readme-links`: PyPI shows the README on its own page, so a relative link such as
+`docs/demo.gif` points at nothing there. The command rewrites them to absolute GitHub
+URLs, which also work on GitHub itself.
+
+## When a release went out wrong
+
+PyPI never lets you replace a published file, and a version number cannot be reused.
+Fix the problem, give it a new version, and upload that.
+
+```powershell
+python scripts/bump_version.py 1.0.1 "Fix the project links shown on PyPI."
+```
+
+That edits `pyproject.toml`, `src/tokenguard/__init__.py` and `CHANGELOG.md`
+together. Then run the checklist above, push, wait for CI, and tag `v1.0.1`.
+
+To warn people off the bad version, open it on pypi.org (Manage -> Release options
+-> Yank). A yanked version is still installable if someone pins it exactly, but pip
+will not choose it otherwise.

@@ -18,6 +18,11 @@
         After uploading: install the package FROM the index into a fresh
         virtualenv and use it. VERSION defaults to the one in pyproject.toml.
 
+    python scripts/release_check.py readme-links [--write] [--branch main]
+        PyPI shows the README on its own page, so a relative link such as
+        docs/algorithms.md breaks there. Lists them; --write rewrites them to
+        absolute GitHub URLs (built from [project.urls] Source). Safe to repeat.
+
 Build first with:  python -m build
 Exit status is 0 when every check passes, 1 otherwise.
 """
@@ -104,6 +109,15 @@ def check_metadata(root=ROOT, release=False):
     urls = project.get("urls", {})
     if not urls:
         problems.append("pyproject.toml: no [project.urls]")
+    readme_text = (root / str(project.get("readme", "README.md"))).read_text("utf-8")
+    relative = relative_links(readme_text)
+    if relative:
+        shown = ", ".join(relative[:4]) + (" ..." if len(relative) > 4 else "")
+        problems.append(
+            f"README.md has {len(relative)} relative link(s) that break on PyPI "
+            f"({shown}). "
+            "Run: python scripts/release_check.py readme-links --write"
+        )
     if release:
         for name, url in urls.items():
             if PLACEHOLDER in url:
@@ -111,6 +125,81 @@ def check_metadata(root=ROOT, release=False):
         if PLACEHOLDER in (root / "README.md").read_text("utf-8"):
             problems.append(f"README.md still has {PLACEHOLDER}")
     return problems
+
+
+SKIP_TARGET = re.compile(r"^(?:[a-z][a-z0-9+.-]*:|#|//)", re.IGNORECASE)
+LINK = re.compile(r"(!?\[[^\]\n]*\])\(\s*([^)\s]+)((?:\s+\"[^\"]*\")?)\s*\)")
+HTML_ATTR = re.compile(r"""(\b(?:src|href)=)(["'])([^"']+)\2""")
+MEDIA = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".mp4", ".webm")
+
+
+def _is_relative(target):
+    return bool(target) and not SKIP_TARGET.match(target)
+
+
+def _outside_fences(text):
+    """Yield (is_code, line) so fenced code blocks are left alone."""
+    fenced = False
+    for line in text.splitlines(keepends=True):
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+            yield True, line
+        else:
+            yield fenced, line
+
+
+def relative_links(text):
+    """Targets of links and images that are relative (they break on PyPI)."""
+    found = []
+    for is_code, line in _outside_fences(text):
+        if is_code:
+            continue
+        found += [m.group(2) for m in LINK.finditer(line) if _is_relative(m.group(2))]
+        found += [
+            m.group(3) for m in HTML_ATTR.finditer(line) if _is_relative(m.group(3))
+        ]
+    return found
+
+
+def absolute_url(target, repo_url, branch="main", image=False):
+    path, _, anchor = target.partition("#")
+    path = path.removeprefix("./")
+    owner_repo = repo_url.rstrip("/").removeprefix("https://github.com/")
+    if image or path.lower().endswith(MEDIA):
+        url = f"https://raw.githubusercontent.com/{owner_repo}/{branch}/{path}"
+    elif path.endswith("/"):
+        url = f"{repo_url.rstrip('/')}/tree/{branch}/{path}"
+    else:
+        url = f"{repo_url.rstrip('/')}/blob/{branch}/{path}"
+    return url + (f"#{anchor}" if anchor else "")
+
+
+def absolutize_readme(text, repo_url, branch="main"):
+    """README text with every relative link made absolute. Idempotent."""
+    out = []
+    for is_code, line in _outside_fences(text):
+        if not is_code:
+
+            def link(match):
+                if not _is_relative(match.group(2)):
+                    return match.group(0)
+                url = absolute_url(
+                    match.group(2),
+                    repo_url,
+                    branch,
+                    image=match.group(1).startswith("!"),
+                )
+                return f"{match.group(1)}({url}{match.group(3)})"
+
+            def attr(match):
+                if not _is_relative(match.group(3)):
+                    return match.group(0)
+                url = absolute_url(match.group(3), repo_url, branch, image=True)
+                return f"{match.group(1)}{match.group(2)}{url}{match.group(2)}"
+
+            line = HTML_ATTR.sub(attr, LINK.sub(link, line))
+        out.append(line)
+    return "".join(out)
 
 
 def check_wheel(path, root=ROOT):
@@ -144,6 +233,11 @@ def check_wheel(path, root=ROOT):
         problems.append(f"wheel Name {metadata['Name']!r} != {expected['name']!r}")
     if metadata["Version"] != expected["version"]:
         problems.append(f"wheel Version {metadata['Version']} != {expected['version']}")
+    for url in metadata.get_all("Project-URL") or []:
+        if PLACEHOLDER in url:
+            problems.append(f"the wheel's project link still has {PLACEHOLDER}: {url}")
+    if PLACEHOLDER in metadata.as_string():
+        problems.append(f"the wheel metadata still contains {PLACEHOLDER}")
     requires = metadata.get_all("Requires-Dist") or []
     if not any(r.lower().startswith("redis") and "extra ==" not in r for r in requires):
         problems.append("the wheel does not require redis")
@@ -294,12 +388,36 @@ def report(problems, ok_text):
     return 0
 
 
+def readme_links_command(write, branch):
+    readme = ROOT / "README.md"
+    text = readme.read_text("utf-8")
+    relative = relative_links(text)
+    if not relative:
+        print("README.md has no relative links")
+        return 0
+    for target in relative:
+        print("  relative:", target)
+    if not write:
+        print(f"{len(relative)} relative link(s). Run again with --write to fix them.")
+        return 1
+    repo_url = load_pyproject(ROOT)["project"].get("urls", {}).get("Source", "")
+    if PLACEHOLDER in repo_url or not repo_url.startswith("https://github.com/"):
+        print(f"[project.urls] Source is {repo_url!r}: run set_github_user.py first")
+        return 1
+    readme.write_text(absolutize_readme(text, repo_url, branch), "utf-8")
+    print(f"rewrote {len(relative)} link(s) to point at {repo_url} ({branch})")
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
     meta = sub.add_parser("metadata")
     meta.add_argument("--release", action="store_true")
     sub.add_parser("name")
+    links = sub.add_parser("readme-links")
+    links.add_argument("--write", action="store_true")
+    links.add_argument("--branch", default="main")
     sub.add_parser("tag").add_argument("tag")
     idx = sub.add_parser("index")
     idx.add_argument("index", choices=sorted(INDEXES))
@@ -320,6 +438,8 @@ def main(argv=None):
                 "Otherwise pick another name."
             )
         return 0 if status == "free" else 1
+    if args.command == "readme-links":
+        return readme_links_command(args.write, args.branch)
     if args.command == "tag":
         return report(check_tag(args.tag), f"{args.tag} matches the version")
     if args.command == "index":

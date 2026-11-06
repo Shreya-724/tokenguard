@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 # The install name differs from the import name: `pip install tokenguard-ratelimit`,
 # then `import tokenguard`. (The name "tokenguard" is taken on PyPI.)
 name = "tokenguard-ratelimit"
-version = "1.0.0"
+version = "1.0.1"
 description = "A token-aware, Redis-backed rate limiter for Django, built for LLM APIs"
 readme = "README.md"
 requires-python = ">=3.10"
