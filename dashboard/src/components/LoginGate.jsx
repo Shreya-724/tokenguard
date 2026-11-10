@@ -18,6 +18,9 @@ export function LoginGate({ phase, error, onLogin, onRetry }) {
     return (
       <div className="gate">
         <ErrorBox message={`Cannot reach the server: ${error}`} onRetry={onRetry} />
+        <a className="back-link" href="#/">
+          Back to the home page
+        </a>
       </div>
     );
   }
@@ -49,6 +52,9 @@ export function LoginGate({ phase, error, onLogin, onRetry }) {
         <button type="submit" className="btn btn-primary" disabled={busy || !username || !password}>
           {busy ? "SIGNING IN…" : "SIGN IN"}
         </button>
+        <a className="back-link" href="#/">
+          Back to the home page
+        </a>
       </form>
     </div>
   );

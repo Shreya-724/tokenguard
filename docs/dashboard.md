@@ -93,3 +93,35 @@ ALLOWED. It is plain CSS with custom properties (no Tailwind or UI kit).
 - History lives in the browser tab only; a reload starts from the server's last
   60 seconds.
 - No pagination or search; it is built for a handful of rules and a short top list.
+
+## Pages and theme
+
+The app has two pages, chosen by the address after `#` (no router library, no server
+setup): `#/` is the home page and `#/dashboard` is the dashboard behind the staff
+sign-in. Anything else is the home page, so in-page anchors like `#install` work.
+Only the dashboard page talks to the API.
+
+- `src/home/` holds the home page. Its hero animation is `src/lib/scene.js`: a canvas
+  drawing of a token bucket guarding an API, driven by `src/lib/bucketSim.js`. With
+  "reduce motion" switched on in the operating system it does not animate; the button
+  still sends requests and the totals update.
+- `src/styles.css` defines the whole palette at the top, from three colours: navy
+  `#14213D` (ground), cream `#F4EDE0` (ink) and coral `#FF6B5B` (blocked, or the one
+  thing to click). Every other shade is a `color-mix` of those three. To retheme the
+  app, change the three variables. The chart colours in `TrafficChart.jsx` are those
+  mixes written out as hex, because Recharts cannot read CSS variables.
+- Fonts (Bricolage Grotesque and Instrument Sans) are installed with npm and bundled,
+  so the app makes no request to a font server.
+
+## Policy pages and site checks
+
+`#/privacy` and `#/terms` describe what the pages really do. If you ever add analytics,
+a font server, an embed or any other third-party request, change `src/home/Legal.jsx`
+(and its "Last updated" date) in the same commit. `test/site.test.js` helps keep that
+honest: it fails if the home page starts using a network or storage API, loads
+anything from another site, or if a text colour drops below 4.5:1 contrast. Spacing
+on the home page comes from one scale (4, 8, 12, 16, 24, 32, 48, 64, 96 px), and the
+same file checks it.
+
+Before a release, run `python scripts/check_site_links.py` to confirm every outside
+link on the home page opens.

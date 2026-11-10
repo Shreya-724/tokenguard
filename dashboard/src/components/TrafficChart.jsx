@@ -13,19 +13,22 @@ import { fmtClock } from "../lib/format.js";
 import { labelSide as side, niceMax, sliceWindow, timeTicks } from "../lib/series.js";
 import { Empty } from "./States.jsx";
 
-// Raw instrument styling: angular lines, no animation, horizontal gridlines only.
+// Instrument styling: angular lines, no animation, horizontal gridlines only.
 // BLOCKED is drawn last (on top) and more than twice as thick as ALLOWED, so
-// token exhaustion jumps out of the baseline.
+// token exhaustion jumps out of the baseline. The colours are mixes of the three
+// brand colours (navy #14213D, cream #F4EDE0, coral #FF6B5B); Recharts needs
+// plain values, so they are written out here: cream, coral, and cream at 14%,
+// 62%, 74% over navy, and coral 55% of the way to cream.
 export const COLORS = {
-  allowed: "#3b9fd1",
-  blocked: "#f43f5e",
-  grid: "#27272a",
-  axis: "#71717a",
-  marker: "#a1a1aa",
-  live: "#fbbf24",
+  allowed: "#F4EDE0",
+  blocked: "#FF6B5B",
+  grid: "#333E54",
+  axis: "#9F9FA2",
+  marker: "#BAB8B6",
+  live: "#FAA697",
 };
 export const WIDTHS = { allowed: 1.25, blocked: 3 };
-const MONO = 'ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace';
+const MONO = '"Instrument Sans Variable", "Segoe UI", ui-sans-serif, system-ui, sans-serif';
 const TICK = { fontSize: 10, fill: COLORS.axis, fontFamily: MONO };
 
 export const WINDOWS = [

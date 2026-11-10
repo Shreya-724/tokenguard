@@ -7,9 +7,13 @@ import { RuleEditor } from "./components/RuleEditor.jsx";
 import { StatusIndicator } from "./components/StatusIndicator.jsx";
 import { BlockedList, ConsumersTable, RoutesTable } from "./components/Tables.jsx";
 import { TrafficChart } from "./components/TrafficChart.jsx";
+import { Home } from "./home/Home.jsx";
+import { Legal } from "./home/Legal.jsx";
 import { useFeed } from "./hooks/useFeed.js";
+import { useRoute } from "./hooks/useRoute.js";
 import { useRules } from "./hooks/useRules.js";
 import { useSession } from "./hooks/useSession.js";
+import { DASHBOARD, PRIVACY, TERMS } from "./lib/route.js";
 import { serverNow } from "./lib/series.js";
 
 const MAX_CHANGES = 6;
@@ -46,7 +50,9 @@ function Dashboard({ username, onSignOut, onExpired }) {
     <div className="app">
       <header className="topbar">
         <div className="bar-left">
-          <span className="brand">TOKENGUARD</span>
+          <a className="brand" href="#/" title="Back to the home page">
+            TOKENGUARD
+          </a>
           <span className="bar-meta">RULES v{rules.data ? rules.data.version : "—"}</span>
         </div>
         <StatusIndicator status={status} receivedAt={receivedAt} backendError={backendError} onRetry={feed.retryNow} />
@@ -107,10 +113,32 @@ function Dashboard({ username, onSignOut, onExpired }) {
   );
 }
 
-export default function App() {
+function DashboardPage() {
   const session = useSession();
   if (session.phase !== "staff") {
     return <LoginGate phase={session.phase} error={session.error} onLogin={session.login} onRetry={session.recheck} />;
   }
   return <Dashboard username={session.username} onSignOut={session.logout} onExpired={session.expire} />;
+}
+
+const TITLES = {
+  home: "tokenguard: rate limiting for LLM APIs, priced in tokens",
+  dashboard: "TOKENGUARD",
+  privacy: "Privacy | tokenguard",
+  terms: "Terms and license | tokenguard",
+};
+
+export default function App() {
+  const route = useRoute();
+
+  // A new page starts at the top. (In-page anchors such as #install do not change the route.)
+  useEffect(() => {
+    window.scrollTo(0, 0);
+    document.title = TITLES[route] ?? TITLES.home;
+  }, [route]);
+
+  // The session check only runs on the dashboard, so the home page makes no API calls.
+  if (route === DASHBOARD) return <DashboardPage />;
+  if (route === PRIVACY || route === TERMS) return <Legal page={route} />;
+  return <Home />;
 }

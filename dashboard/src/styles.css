@@ -1,19 +1,29 @@
-/* Industrial telemetry: raw charcoal, hairline borders, square corners, no
-   shadows, monospace tabular numbers so live values never make the layout jump. */
+/* Three colours carry the whole app: navy is the ground, cream is the ink, and
+   coral means "blocked" or "do this". Every other shade below is a mix of those
+   three, so nothing else can creep in. The dashboard keeps square corners and
+   tabular numbers so live values never make the layout jump. */
 :root {
   color-scheme: dark;
-  --bg: #09090b; /* zinc-950 */
-  --bg-2: #18181b; /* zinc-900 */
-  --line: #27272a; /* zinc-800 */
-  --line-faint: #18181b;
-  --text: #d4d4d8;
-  --dim: #a1a1aa;
-  --faint: #71717a;
-  --allowed: #3b9fd1;
-  --blocked: #f43f5e;
-  --ok: #4ade80;
-  --warn: #fbbf24;
-  --bad: #f43f5e;
+  --navy: #14213d;
+  --cream: #f4ede0;
+  --coral: #ff6b5b;
+
+  --bg: var(--navy);
+  --bg-2: color-mix(in srgb, var(--cream) 7%, var(--navy));
+  --line: color-mix(in srgb, var(--cream) 16%, var(--navy));
+  --line-strong: color-mix(in srgb, var(--cream) 34%, var(--navy));
+  --line-faint: color-mix(in srgb, var(--cream) 9%, var(--navy));
+  --text: var(--cream);
+  --dim: color-mix(in srgb, var(--cream) 74%, var(--navy));
+  --faint: color-mix(in srgb, var(--cream) 62%, var(--navy));
+  --allowed: var(--cream);
+  --blocked: var(--coral);
+  --ok: var(--cream);
+  --warn: color-mix(in srgb, var(--coral) 55%, var(--cream));
+  --bad: var(--coral);
+
+  --display: "Bricolage Grotesque Variable", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  --sans: "Instrument Sans Variable", "Segoe UI", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace;
 }
 
@@ -21,7 +31,20 @@
 *::before,
 *::after {
   box-sizing: border-box;
-  border-radius: 0; /* never soft corners */
+}
+/* the dashboard and sign-in screen are square; the home page has its own shapes */
+.app *,
+.gate * {
+  border-radius: 0;
+}
+
+html {
+  scroll-padding-top: 12px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
 }
 
 html,
@@ -34,7 +57,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font: 12px/1.45 var(--mono);
+  font: 13px/1.45 var(--sans);
   font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
 }
@@ -76,8 +99,8 @@ select {
 }
 
 :focus-visible {
-  outline: 1px solid var(--dim);
-  outline-offset: 1px;
+  outline: 2px solid var(--coral);
+  outline-offset: 2px;
 }
 
 /* ---------- top bar ---------- */
@@ -99,9 +122,17 @@ select {
   gap: 12px;
 }
 .brand {
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  font-size: 12px;
+  font-family: var(--display);
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  font-size: 14px;
+}
+a.brand {
+  color: inherit;
+  text-decoration: none;
+}
+a.brand:hover {
+  color: var(--coral);
 }
 .bar-meta {
   color: var(--faint);
@@ -519,7 +550,7 @@ label {
   color: var(--text);
 }
 .input:hover {
-  border-color: #3f3f46;
+  border-color: var(--line-strong);
 }
 .input.is-bad {
   border-color: var(--bad);
@@ -551,14 +582,14 @@ select.input {
   cursor: not-allowed;
 }
 .btn-primary {
-  background: var(--text);
-  color: var(--bg);
-  border-color: var(--text);
+  background: var(--coral);
+  color: var(--navy);
+  border-color: var(--coral);
   font-weight: 700;
 }
 .btn-primary:hover:not(:disabled) {
-  background: #fff;
-  border-color: #fff;
+  background: color-mix(in srgb, var(--coral) 80%, var(--cream));
+  border-color: color-mix(in srgb, var(--coral) 80%, var(--cream));
 }
 .btn-primary:disabled {
   background: var(--bg-2);
@@ -675,7 +706,15 @@ select.input {
   gap: 8px;
 }
 .login .brand {
-  font-size: 14px;
+  font-size: 20px;
+}
+.back-link {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--dim);
+}
+.back-link:hover {
+  color: var(--coral);
 }
 .login .btn {
   margin-top: 8px;
