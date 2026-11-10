@@ -106,14 +106,17 @@ def test_a_full_redis_with_noeviction_means_unavailable_not_a_crash(redis_client
             assert is_unavailable(exc), repr(exc)
         else:
             pytest.fail("Redis never reached its memory limit")
-                        # The fill proved Redis can hit its limit, but memory drifts right at
+            # The fill proved Redis can hit its limit, but memory drifts right at
             # the edge. Push the limit well below usage so every write is refused.
             redis_client.execute_command(
-                "CONFIG", "SET", "maxmemory", str(max(1, used_memory(redis_client) // 2))
+                "CONFIG",
+                "SET",
+                "maxmemory",
+                str(max(1, used_memory(redis_client) // 2)),
             )
             algo = get_algorithm("token_bucket", redis_client, key_prefix=prefix)
             with pytest.raises(RedisUnavailableError):
-             algo.check("someone", 1, Limit(5, 1))
+                algo.check("someone", 1, Limit(5, 1))
     finally:
         redis_client.execute_command("CONFIG", "SET", "maxmemory", old["maxmemory"])
         redis_client.execute_command(
