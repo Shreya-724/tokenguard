@@ -109,7 +109,8 @@ SHAPE = os.getenv("SHAPE", "").lower()
 if SHAPE:
 
     class DemoShape(LoadTestShape):
-        # spike: calm, sudden surge, calm.  ramp: climbs steadily.  wave: rises and falls.
+        # spike: calm, sudden surge, calm.  ramp: climbs steadily.
+        # wave (handled in tick below): rises and falls.
         STAGES = {
             "spike": [(20, 5, 5), (35, 60, 60), (60, 5, 60)],
             "ramp": [(15, 5, 5), (30, 20, 5), (45, 40, 5), (60, 80, 10)],
