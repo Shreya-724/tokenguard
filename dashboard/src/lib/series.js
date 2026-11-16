@@ -102,3 +102,45 @@ export function niceMax(points, keys = ["allowed", "blocked"]) {
 export function labelSide(x, first, last) {
   return last > first && (x - first) / (last - first) > 0.5 ? "Right" : "Left";
 }
+
+/**
+ * Give each rule-change marker label a row, so labels that would run into each
+ * other are stacked instead of overprinted. Markers are placed in time order; a
+ * marker takes the first row where its label does not overlap the label of an
+ * earlier marker on that row. A label is about `charPx` pixels per character
+ * wide and runs away from its line, toward the middle of the chart (see
+ * labelSide). `plotPx` is the plot's width in pixels; a smaller guess only makes
+ * the spacing more careful. Returns { [id]: row }, rows counted from 0 and
+ * capped at `maxRows - 1` (past that, labels share the last row).
+ *
+ * @param {{id: string, ts: number, label: string}[]} markers
+ */
+export function markerRows(markers, first, last, { plotPx = 520, charPx = 6.5, gapPx = 10, maxRows = 3 } = {}) {
+  const rows = {};
+  if (!(last > first)) {
+    for (const m of markers) rows[m.id] = 0;
+    return rows;
+  }
+  const secondsPerPx = (last - first) / plotPx;
+  const placed = []; // { row, from, to } in seconds
+  for (const m of [...markers].sort((a, b) => a.ts - b.ts)) {
+    const width = (String(m.label ?? "").length * charPx + gapPx) * secondsPerPx;
+    const toLeft = labelSide(m.ts, first, last) === "Right"; // "Right" means the text runs left
+    const from = toLeft ? m.ts - width : m.ts;
+    const to = toLeft ? m.ts : m.ts + width;
+    let row = 0;
+    while (row < maxRows - 1 && placed.some((p) => p.row === row && from < p.to && to > p.from)) row += 1;
+    placed.push({ row, from, to });
+    rows[m.id] = row;
+  }
+  return rows;
+}
+
+/**
+ * Where to draw a marker label: x, y and text anchor, from the marker line's
+ * viewBox ({ x, y }), the side the text runs to and the row. Rows are 12px apart.
+ */
+export function markerLabelPlacement(viewBox, side, row = 0) {
+  const toLeft = side === "Right";
+  return { x: viewBox.x + (toLeft ? -4 : 4), y: viewBox.y + 11 + row * 12, anchor: toLeft ? "end" : "start" };
+}

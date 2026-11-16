@@ -10,7 +10,14 @@ import {
   YAxis,
 } from "recharts";
 import { fmtClock } from "../lib/format.js";
-import { labelSide as side, niceMax, sliceWindow, timeTicks } from "../lib/series.js";
+import {
+  labelSide as side,
+  markerLabelPlacement,
+  markerRows,
+  niceMax,
+  sliceWindow,
+  timeTicks,
+} from "../lib/series.js";
 import { Empty } from "./States.jsx";
 
 // Instrument styling: angular lines, no animation, horizontal gridlines only.
@@ -37,6 +44,18 @@ export const WINDOWS = [
   { seconds: 600, label: "10M" },
 ];
 
+// A rule-change label drawn by hand so it can sit on its own row. Recharts hands
+// this the marker line's viewBox; markerLabelPlacement turns that into a position.
+function MarkerLabel({ viewBox, value, side: where, row }) {
+  if (!viewBox) return null;
+  const { x, y, anchor } = markerLabelPlacement(viewBox, where, row);
+  return (
+    <text x={x} y={y} textAnchor={anchor} fill={COLORS.marker} fontSize={10} fontFamily={MONO}>
+      {value}
+    </text>
+  );
+}
+
 function ChartTooltip({ active, payload, label }) {
   if (!active || !payload || payload.length === 0) return null;
   const row = payload[0].payload;
@@ -59,6 +78,10 @@ export function TrafficChart({ history, windowSeconds, onWindowChange, markers }
   const last = data[data.length - 1]?.ts;
   const ticks = useMemo(() => (first == null ? [] : timeTicks(first, last, 6)), [first, last]);
   const top = useMemo(() => niceMax(data), [data]);
+  const rows = useMemo(
+    () => (first == null ? {} : markerRows(markers, first, last)),
+    [markers, first, last],
+  );
 
   return (
     <div className="chart">
@@ -136,11 +159,9 @@ export function TrafficChart({ history, windowSeconds, onWindowChange, markers }
                   stroke={COLORS.marker}
                   strokeDasharray="2 3"
                   label={{
-                    value: m.label,
-                    position: `insideTop${side(m.ts, first, last)}`,
-                    fill: COLORS.marker,
-                    fontSize: 10,
-                    fontFamily: MONO,
+                    content: (props) => (
+                      <MarkerLabel {...props} value={m.label} side={side(m.ts, first, last)} row={rows[m.id] ?? 0} />
+                    ),
                   }}
                 />
               ))}

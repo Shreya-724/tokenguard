@@ -3,6 +3,8 @@ import { test } from "node:test";
 import {
   beforeAfter,
   labelSide,
+  markerLabelPlacement,
+  markerRows,
   mergeSeries,
   niceMax,
   serverNow,
@@ -158,4 +160,46 @@ test("labelSide keeps a marker's label on the chart", () => {
   assert.equal(labelSide(190, 100, 200), "Right"); // near the right edge: text runs left
   assert.equal(labelSide(150, 100, 200), "Left"); // exactly the middle
   assert.equal(labelSide(5, 10, 10), "Left"); // degenerate window
+});
+
+// ---- markerRows / markerLabelPlacement ----
+
+const mk = (id, ts, label) => ({ id, ts, label });
+
+test("markerRows puts labels that would overlap on different rows", () => {
+  // The screenshot case: two long labels, a few seconds apart, in a 60 s window.
+  const markers = [
+    mk("a", 160, "fixed_window\u2192sliding_window"),
+    mk("b", 165, "sliding_window\u2192token_bucket"),
+  ];
+  const rows = markerRows(markers, 100, 200);
+  assert.notEqual(rows.a, rows.b);
+});
+
+test("markerRows leaves far-apart labels on the same row", () => {
+  const rows = markerRows([mk("a", 110, "x\u2192y"), mk("b", 190, "y\u2192z")], 100, 200);
+  assert.deepEqual(rows, { a: 0, b: 0 });
+});
+
+test("markerRows does not depend on the order markers arrive in", () => {
+  const a = mk("a", 160, "fixed_window\u2192sliding_window");
+  const b = mk("b", 165, "sliding_window\u2192token_bucket");
+  assert.deepEqual(markerRows([a, b], 100, 200), markerRows([b, a], 100, 200));
+});
+
+test("markerRows caps the rows and copes with an empty or degenerate window", () => {
+  const many = Array.from({ length: 8 }, (_, i) => mk(`m${i}`, 150 + i, "fixed_window\u2192sliding_window"));
+  assert.ok(Math.max(...Object.values(markerRows(many, 100, 200))) <= 2);
+  assert.deepEqual(markerRows([], 100, 200), {});
+  assert.deepEqual(markerRows([mk("a", 5, "x")], 10, 10), { a: 0 });
+});
+
+test("markerLabelPlacement runs text away from the line, one row lower each time", () => {
+  const left = markerLabelPlacement({ x: 50, y: 10 }, "Left", 0);
+  assert.equal(left.anchor, "start");
+  assert.ok(left.x > 50);
+  const right = markerLabelPlacement({ x: 50, y: 10 }, "Right", 0);
+  assert.equal(right.anchor, "end");
+  assert.ok(right.x < 50);
+  assert.equal(markerLabelPlacement({ x: 0, y: 10 }, "Left", 2).y - markerLabelPlacement({ x: 0, y: 10 }, "Left", 0).y, 24);
 });
