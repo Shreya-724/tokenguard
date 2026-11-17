@@ -12,7 +12,7 @@ export function gaugeLevel(remaining, capacity) {
   return "ok";
 }
 
-export function BucketGauge({ bucketKey, onKeyChange, onUnauthorized }) {
+export function BucketGauge({ bucketKey, auto = false, onKeyChange, onFollowTop, onUnauthorized }) {
   const [draft, setDraft] = useState("");
   const { data, error, loading } = useBucket(bucketKey, { onUnauthorized });
 
@@ -46,7 +46,18 @@ export function BucketGauge({ bucketKey, onKeyChange, onUnauthorized }) {
         </button>
       </form>
 
-      {!bucketKey && <Empty label="CLICK A CONSUMER OR ENTER A KEY" />}
+      {bucketKey && (
+        <div className="note">
+          {auto ? (
+            "FOLLOWING THE TOP CONSUMER · click a row or enter a key to pin another"
+          ) : onFollowTop ? (
+            <button type="button" className="linkish" onClick={onFollowTop}>
+              FOLLOW THE TOP CONSUMER
+            </button>
+          ) : null}
+        </div>
+      )}
+      {!bucketKey && <Empty label="WAITING FOR TRAFFIC · OR CLICK A CONSUMER, OR ENTER A KEY" />}
       {bucketKey && loading && !data && <Loading label="READING BUCKET" />}
       {bucketKey && error && <ErrorBox message={error} />}
       {bucketKey && data && (

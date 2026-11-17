@@ -15,6 +15,7 @@ import { useRules } from "./hooks/useRules.js";
 import { useSession } from "./hooks/useSession.js";
 import { DASHBOARD, PRIVACY, TERMS } from "./lib/route.js";
 import { serverNow } from "./lib/series.js";
+import { autoWatchKey } from "./lib/watch.js";
 
 const MAX_CHANGES = 6;
 
@@ -23,6 +24,7 @@ function Dashboard({ username, onSignOut, onExpired }) {
   const rules = useRules(true, { onUnauthorized: onExpired });
   const [windowSeconds, setWindowSeconds] = useState(60);
   const [bucketKey, setBucketKey] = useState(null);
+  const [autoWatch, setAutoWatch] = useState(true); // follow the top consumer until the user picks a key
   const [scope, setScope] = useState(null);
   const [changes, setChanges] = useState([]);
 
@@ -36,6 +38,16 @@ function Dashboard({ username, onSignOut, onExpired }) {
     () => (oldest == null ? changes : changes.filter((c) => c.liveAt >= oldest)),
     [changes, oldest],
   );
+
+  // Keep the Bucket level panel filled: follow the top consumer until a key is chosen.
+  const topKeys = snapshot?.consumers;
+  useEffect(() => {
+    setBucketKey((current) => autoWatchKey(current, autoWatch, topKeys));
+  }, [autoWatch, topKeys]);
+  const chooseKey = useCallback((key) => {
+    setAutoWatch(false);
+    setBucketKey(key);
+  }, []);
 
   const serverTime = useCallback(() => serverNow(snapshot, receivedAt), [snapshot, receivedAt]);
   const onChanged = useCallback((change) => {
@@ -80,10 +92,10 @@ function Dashboard({ username, onSignOut, onExpired }) {
 
           <div className="row-2">
             <Panel title="TOP CONSUMERS · TOKENS" meta="last 2 min">
-              <ConsumersTable rows={snapshot?.consumers} loading={loading} selectedKey={bucketKey} onSelect={setBucketKey} />
+              <ConsumersTable rows={snapshot?.consumers} loading={loading} selectedKey={bucketKey} onSelect={chooseKey} />
             </Panel>
             <Panel title="MOST BLOCKED" meta="last 2 min">
-              <BlockedList rows={snapshot?.blocked_consumers} loading={loading} selectedKey={bucketKey} onSelect={setBucketKey} />
+              <BlockedList rows={snapshot?.blocked_consumers} loading={loading} selectedKey={bucketKey} onSelect={chooseKey} />
             </Panel>
           </div>
 
@@ -94,7 +106,7 @@ function Dashboard({ username, onSignOut, onExpired }) {
 
         <div className="col-side">
           <Panel title="BUCKET LEVEL" meta="live · 1s">
-            <BucketGauge bucketKey={bucketKey} onKeyChange={setBucketKey} onUnauthorized={onExpired} />
+            <BucketGauge bucketKey={bucketKey} auto={autoWatch} onKeyChange={chooseKey} onFollowTop={() => setAutoWatch(true)} onUnauthorized={onExpired} />
           </Panel>
           <Panel title="RULE EDITOR" meta={rules.data ? (rules.data.live_rules_enabled ? "live rules on" : "live rules OFF") : null}>
             <RuleEditor
