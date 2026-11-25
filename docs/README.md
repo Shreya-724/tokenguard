@@ -15,5 +15,8 @@
 | [releasing.md](releasing.md) | Building the package, checking the wheel, and a clean-install test |
 | [demo-script.md](demo-script.md) | A 60-second demo script and how to record the GIF |
 | [race-condition.md](race-condition.md) | The check-then-act race, reproduced and fixed with Lua |
+| [security.md](security.md) | Fail-open vs fail-closed, client IPs, attacks and defences |
+| [design.md](design.md) | How a token bucket works, architecture, design decisions, known limitations |
+| [development.md](development.md) | Running the demo and the tests |
 
 Reproducible numbers: `python scripts/compare_algorithms.py`.

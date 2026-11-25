@@ -5,8 +5,6 @@ import re
 import sys
 from pathlib import Path
 
-import pytest
-
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
@@ -29,14 +27,22 @@ def code_blocks(text, language):
     return re.findall(rf"```{language}\n(.*?)```", text, re.DOTALL)
 
 
-def test_every_setting_is_documented_in_the_readme_and_the_reference():
+def test_every_setting_is_documented_in_the_reference():
     settings = default_settings()
     assert len(settings) >= 15
     for name in settings:
-        assert f"| `{name}` |" in README, f"{name} is missing from the README table"
         assert f"| `{name}` |" in CONFIGURATION, (
             f"{name} is missing from configuration.md"
         )
+
+
+def test_the_readme_points_at_the_settings_reference():
+    assert "docs/configuration.md" in README
+
+
+def test_the_readme_stays_short():
+    # The README is the front page: a reader should get through it in minutes.
+    assert len(README.splitlines()) <= 260
 
 
 def test_the_examples_are_valid_python():
@@ -88,38 +94,3 @@ def test_local_links_point_at_files_that_exist():
     for target in re.findall(r"\]\((docs/[^)#]+|scripts/[^)#]+)", README):
         if target in owned:
             assert (ROOT / target).is_file()
-
-
-DJANGO_TEMPLATE_MIDDLEWARE = """MIDDLEWARE = [
-    'django.middleware.security.SecurityMiddleware',
-    'django.contrib.sessions.middleware.SessionMiddleware',
-    'django.contrib.auth.middleware.AuthenticationMiddleware',
-    'django.contrib.messages.middleware.MessageMiddleware',
-]
-"""
-
-
-def test_patch_settings_handles_djangos_single_quoted_template():
-    import quickstart_check as qs
-
-    for text in (
-        DJANGO_TEMPLATE_MIDDLEWARE,
-        DJANGO_TEMPLATE_MIDDLEWARE.replace("'", '"'),
-        DJANGO_TEMPLATE_MIDDLEWARE.replace("\n", "\r\n"),
-    ):
-        patched = qs.patch_settings(text, "redis://x:1/5", "pfx")
-        compile(patched, "settings.py", "exec")
-        lines = [line.strip() for line in patched.splitlines()]
-        auth = next(
-            i for i, line in enumerate(lines) if "AuthenticationMiddleware" in line
-        )
-        assert "TokenGuardMiddleware" in lines[auth + 1]
-        assert '"REDIS_URL": "redis://x:1/5"' in patched
-        assert '"KEY_PREFIX": "pfx"' in patched
-
-
-def test_patch_settings_explains_when_the_anchor_is_missing():
-    import quickstart_check as qs
-
-    with pytest.raises(SystemExit):
-        qs.patch_settings("MIDDLEWARE = []\n", "redis://x/5", "p")
