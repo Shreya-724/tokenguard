@@ -11,12 +11,15 @@ export const TERMS = "terms";
 
 const PAGES = new Set([DASHBOARD, PRIVACY, TERMS]);
 
-export function parseRoute(hash) {
+// `siteOnly` is the static website build (GitHub Pages): it has no Django behind it,
+// so there is no dashboard page there and "#/dashboard" shows the home page.
+export function parseRoute(hash, siteOnly = false) {
   const path = String(hash ?? "")
     .replace(/^#\/?/, "")
     .split(/[?#]/)[0]
     .replace(/\/+$/, "");
-  return PAGES.has(path) ? path : HOME;
+  if (!PAGES.has(path)) return HOME;
+  return siteOnly && path === DASHBOARD ? HOME : path;
 }
 
 export function routeHref(route) {

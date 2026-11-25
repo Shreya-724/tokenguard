@@ -22,3 +22,16 @@ test("links round-trip", () => {
     assert.equal(parseRoute(routeHref(page)), page, page);
   }
 });
+
+test("the website build has no dashboard page", () => {
+  assert.equal(parseRoute("#/dashboard", true), HOME);
+  assert.equal(parseRoute("#/dashboard/", true), HOME);
+  assert.equal(parseRoute("#/privacy", true), PRIVACY);
+  assert.equal(parseRoute("#/terms", true), TERMS);
+  assert.equal(parseRoute("#install", true), HOME);
+});
+
+test("the full build keeps the dashboard page", () => {
+  assert.equal(parseRoute("#/dashboard", false), DASHBOARD);
+  assert.equal(parseRoute("#/dashboard"), DASHBOARD);
+});

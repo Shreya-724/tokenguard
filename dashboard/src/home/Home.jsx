@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { DASHBOARD, PRIVACY, TERMS, routeHref } from "../lib/route.js";
+import { SITE_ONLY } from "../lib/site.js";
 import { HeroScene } from "./HeroScene.jsx";
 
 export const GITHUB = "https://github.com/Shreya-724/tokenguard";
 const PYPI = "https://pypi.org/project/tokenguard-ratelimit/";
+const DEMO = `${GITHUB}#dashboard-and-demo`;
 const docs = (name) => `${GITHUB}/blob/main/docs/${name}`;
 
 const INSTALL = 'pip install "tokenguard-ratelimit[django]"';
@@ -57,6 +59,24 @@ function useCopy(text) {
 const copyLabel = (state, idle) =>
   state === "copied" ? "Copied" : state === "failed" ? "Copy blocked: select the text" : idle;
 
+// The button to the dashboard. The website build has no dashboard (it needs Django
+// and Redis behind it), so there the button says so and goes to the steps to run it.
+function DashboardButton({ big = false }) {
+  const size = big ? " h-btn-big" : "";
+  if (SITE_ONLY) {
+    return (
+      <a className={`h-btn h-btn-coral${size}`} href={DEMO} rel="noreferrer">
+        Run the dashboard locally
+      </a>
+    );
+  }
+  return (
+    <a className={`h-btn h-btn-coral${size}`} href={routeHref(DASHBOARD)}>
+      Open the dashboard
+    </a>
+  );
+}
+
 export function Header({ minimal = false }) {
   return (
     <header className="h-header">
@@ -75,9 +95,7 @@ export function Header({ minimal = false }) {
             </a>
           </nav>
         )}
-        <a className="h-btn h-btn-coral" href={routeHref(DASHBOARD)}>
-          Open the dashboard
-        </a>
+        <DashboardButton />
       </div>
     </header>
   );
@@ -95,9 +113,7 @@ function Hero() {
             50,000-token prompt costs more than a 12-token one.
           </p>
           <div className="h-actions">
-            <a className="h-btn h-btn-coral h-btn-big" href={routeHref(DASHBOARD)}>
-              Open the dashboard
-            </a>
+            <DashboardButton big />
             <a className="h-btn h-btn-ghost h-btn-big" href={`${GITHUB}#quick-start-5-minutes`} rel="noreferrer">
               Read the quick start
             </a>
@@ -259,9 +275,7 @@ export function Footer() {
             The dashboard shows every decision as it happens, and lets you change a limit or an algorithm while requests
             keep flowing.
           </p>
-          <a className="h-btn h-btn-coral h-btn-big" href={routeHref(DASHBOARD)}>
-            Open the dashboard
-          </a>
+          <DashboardButton big />
         </div>
         <ul className="h-links">
           <li>
