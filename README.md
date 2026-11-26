@@ -6,6 +6,8 @@ A **token-aware, Redis-backed rate limiter for Django**, built for LLM APIs.
 Limit clients by *how much they consume*, not just how often they call, and stay
 correct when many requests arrive at once.
 
+**Website:** https://shreya-724.github.io/tokenguard/
+
 <!-- After recording (see docs/demo-script.md), save the GIF as docs/demo.gif and
      remove the comment markers around the image line to show it:
 ![The dashboard: traffic, a client hits its limit, the rule is edited live](https://raw.githubusercontent.com/Shreya-724/tokenguard/main/docs/demo.gif)
@@ -203,6 +205,7 @@ sliding window grows with the limit (6.2 KB at a limit of 100). See
 
 | Page | What it covers |
 |---|---|
+| [Website](https://shreya-724.github.io/tokenguard/) | The home page, with a live token-bucket simulation |
 | [Configuration](https://github.com/Shreya-724/tokenguard/blob/main/docs/configuration.md) | Every setting, rule fields, key functions, response headers |
 | [Examples](https://github.com/Shreya-724/tokenguard/blob/main/docs/examples.md) | Twelve copy-paste recipes: login, API keys, LLM budgets, proxies |
 | [Cost model](https://github.com/Shreya-724/tokenguard/blob/main/docs/cost-model.md) | Estimates, model weights, reconciliation, budgets, alerts, streaming |

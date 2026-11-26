@@ -44,7 +44,7 @@ classifiers = [
 dependencies = ["redis>=5.0"]
 
 [project.urls]
-Homepage = "https://github.com/Shreya-724/tokenguard"
+Homepage = "https://shreya-724.github.io/tokenguard/"
 Source = "https://github.com/Shreya-724/tokenguard"
 Issues = "https://github.com/Shreya-724/tokenguard/issues"
 Changelog = "https://github.com/Shreya-724/tokenguard/blob/main/CHANGELOG.md"
